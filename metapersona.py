@@ -30,6 +30,11 @@ from src.personalized_agents import (
     PersonalizedGeneralistAgent
 )
 from src.user_profiling import UserProfilingSystem, UserProfile
+from src.meeting_listener import MeetingListener, MeetingSummarizer
+from src.meeting_integrations import MeetingURLParser, VirtualAudioDevice, setup_meeting_listener
+from src.onboarding import run_onboarding
+from src.persona_factory import PersonaFactory
+from src.question_router import QuestionRouter
 
 console = Console()
 
@@ -107,17 +112,47 @@ def init(user_id: str, data_dir: str):
 
 
 @cli.command()
+@click.option('--data-dir', default='./data', help='Data directory path')
+def onboard(data_dir: str):
+    """Complete onboarding to generate personalized expert personas."""
+    data_path = Path(data_dir)
+    
+    # Run onboarding interview
+    user_profile = run_onboarding(data_path)
+    
+    # Generate expert personas based on profile
+    factory = PersonaFactory(data_path)
+    personas = factory.generate_personas_from_profile(user_profile)
+    
+    console.print("\n[bold green]🎉 Onboarding Complete![/bold green]\n")
+    console.print(f"Created {len(personas)} specialized expert personas:\n")
+    
+    for persona in personas:
+        console.print(f"  • [cyan]{persona['name']}[/cyan] - {persona['role']}")
+        console.print(f"    Expertise: {', '.join(persona['expertise_areas'][:3])}")
+        console.print()
+    
+    console.print("[dim]These personas understand YOUR context and will provide personalized guidance.[/dim]")
+    console.print("[dim]Use 'python metapersona.py ask-expert <your question>' to get expert help![/dim]\n")
+
+
+@cli.command()
 @click.option('--provider', help='LLM provider (openai/anthropic/ollama)')
 @click.option('--data-dir', default='./data', help='Data directory path')
 @click.option('--use-profile', is_flag=True, help='Use adaptive user profile if available')
-def chat(provider: str, data_dir: str, use_profile: bool):
-    """Start interactive chat session with your agent."""
+@click.option('--use-experts', is_flag=True, help='Enable auto-generated expert personas')
+def chat(provider: str, data_dir: str, use_profile: bool, use_experts: bool):
+    """Start interactive chat session with your agent (with optional expert routing)."""
     console.print("\n[bold cyan]💬 MetaPersona Chat Session[/bold cyan]\n")
     
     # Initialize agent
     try:
-        # Check if adaptive profile is requested but doesn't exist - trigger onboarding
+        # Auto-enable experts if profile is used
         if use_profile:
+            use_experts = True
+            
+        # Check if adaptive profile is requested but doesn't exist - trigger onboarding
+        if use_profile or use_experts:
             profile_manager = ProfileManager(data_dir)
             cognitive_profile = profile_manager.load_profile()
             
@@ -131,9 +166,17 @@ def chat(provider: str, data_dir: str, use_profile: bool):
                     if Confirm.ask("Would you like me to ask you some questions to personalize your experience?", default=True):
                         user_profile = profiling_system.conduct_onboarding(cognitive_profile.user_id, interactive=True)
                         console.print("\n[green]✓ Profile created! Starting chat with personalized settings...[/green]\n")
+                        
+                        # Auto-generate expert personas based on profile
+                        from src.persona_factory import PersonaFactory
+                        factory = PersonaFactory(data_dir)
+                        generated = factory.generate_personas_from_profile(user_profile)
+                        console.print(f"[green]✓ Generated {len(generated)} expert personas for you![/green]\n")
+                        use_experts = True
                     else:
                         console.print("[yellow]Continuing without adaptive profile...[/yellow]\n")
                         use_profile = False
+                        use_experts = False
         
         agent_manager = AgentManager(data_dir)
         agent = agent_manager.initialize_agent(provider_name=provider, use_adaptive_profile=use_profile)
@@ -152,7 +195,17 @@ def chat(provider: str, data_dir: str, use_profile: bool):
         
         console.print(Panel(profile_info, border_style="cyan"))
         
-        console.print("\n[dim]Type 'exit' to quit, 'clear' to clear history, 'status' for agent info[/dim]\n")
+        # Initialize expert routing if enabled
+        question_router = None
+        if use_experts:
+            from src.question_router import QuestionRouter
+            from src.persona_factory import PersonaFactory
+            factory = PersonaFactory(data_dir)
+            question_router = QuestionRouter(factory)
+            console.print("[green]✓ Expert persona routing enabled[/green]")
+            console.print("[dim]Questions will be automatically routed to the best expert persona[/dim]\n")
+        
+        console.print("\n[dim]Type 'exit' to quit, 'clear' to clear history, 'status' for agent info, 'experts' to list experts[/dim]\n")
         
         while True:
             try:
@@ -167,9 +220,37 @@ def chat(provider: str, data_dir: str, use_profile: bool):
                 elif task.lower() == 'status':
                     show_status(agent)
                     continue
+                elif task.lower() == 'experts' and question_router:
+                    personas = question_router.factory.list_personas()
+                    console.print("\n[bold]Your Expert Personas:[/bold]")
+                    for p in personas:
+                        console.print(f"  • [cyan]{p['name']}[/cyan] - {p['role']}")
+                        console.print(f"    Expertise: {', '.join(p['expertise_areas'][:3])}")
+                    console.print()
+                    continue
                 
-                # Process task
-                response = agent.process_task(task)
+                # Route to expert if enabled, otherwise use main agent
+                if use_experts and question_router:
+                    # Route question to best expert
+                    routing = question_router.route_question(task, agent.profile)
+                    
+                    if routing['expert_persona']:
+                        console.print(f"[dim]→ Routing to expert: {routing['expert_persona']['name']} (confidence: {routing['confidence']:.0%})[/dim]")
+                        
+                        # Generate response using expert context
+                        expert_context = f"""You are {routing['expert_persona']['name']}, {routing['expert_persona']['role']}.
+
+Your expertise: {', '.join(routing['expert_persona']['expertise_areas'])}
+
+Respond as this expert while maintaining the user's communication style and preferences."""
+                        
+                        response = agent.process_task(task, context=expert_context)
+                    else:
+                        # Fallback to main agent
+                        response = agent.process_task(task)
+                else:
+                    # Process task with main agent
+                    response = agent.process_task(task)
                 
                 # Display response
                 console.print(f"\n[bold green]Agent[/bold green]")
@@ -842,6 +923,25 @@ def onboard(user_id: str, data_dir: str):
         # Conduct onboarding
         profile = profiling_system.conduct_onboarding(user_id, interactive=True)
         
+        # Generate expert personas based on profile
+        console.print("\n[bold cyan]🤖 Generating Expert AI Personas...[/bold cyan]\n")
+        from src.persona_factory import PersonaFactory
+        import json
+        
+        # Load the profile data
+        profile_path = Path("data/user_profiles") / f"{user_id}.json"
+        if profile_path.exists():
+            with open(profile_path, 'r') as f:
+                profile_data = json.load(f)
+            
+            factory = PersonaFactory(Path("data"))
+            created_personas = factory.generate_personas_from_profile(profile_data)
+            
+            if created_personas:
+                console.print(f"[green]✓ Created {len(created_personas)} expert personas![/green]\n")
+            else:
+                console.print("[yellow]⚠ No expert personas created (may need more specific info)[/yellow]\n")
+        
         # Show summary
         console.print(Panel(
             f"[bold]Profile Summary for {profile.user_id}[/bold]\n\n"
@@ -1250,6 +1350,610 @@ def persona_chat(provider: str, data_dir: str):
         console.print(f"[red]Error: {str(e)}[/red]")
         import traceback
         traceback.print_exc()
+
+
+@cli.command('meeting-listen')
+@click.option('--title', prompt='Meeting title', help='Title of the meeting')
+@click.option('--url', help='Meeting URL (optional)')
+@click.option('--data-dir', default='./data', help='Data directory path')
+@click.option('--model', default='base', help='Whisper model (tiny/base/small/medium/large)')
+@click.option('--no-summary', is_flag=True, help='Disable automatic summary generation')
+@click.option('--device', type=int, help='Audio input device index (run meeting-devices to see list)')
+@click.option('--list-devices', is_flag=True, help='List audio devices and exit')
+def meeting_listen(title: str, url: str, data_dir: str, model: str, no_summary: bool, device: int, list_devices: bool):
+    """Start listening to a meeting and transcribe in real-time."""
+    from prompt_toolkit import PromptSession
+    
+    try:
+        console.print("\n[bold cyan]🎙️ Meeting Listener[/bold cyan]\n")
+        
+        # List devices if requested
+        if list_devices:
+            try:
+                import sounddevice as sd
+                console.print("[bold]Available Audio Input Devices:[/bold]\n")
+                devices = sd.query_devices()
+                for i, dev in enumerate(devices):
+                    if dev['max_input_channels'] > 0:
+                        default = " [green](DEFAULT)[/green]" if i == sd.default.device[0] else ""
+                        console.print(f"  {i}: {dev['name']}{default}")
+                        console.print(f"      Channels: {dev['max_input_channels']}, Sample Rate: {dev['default_samplerate']}")
+                console.print("\n[dim]Use: python metapersona.py meeting-listen --device <number>[/dim]")
+                return
+            except ImportError:
+                console.print("[red]sounddevice not installed. Install with: pip install sounddevice[/red]")
+                return
+            except Exception as e:
+                console.print(f"[red]Error listing devices: {e}[/red]")
+                return
+        
+        # Parse URL if provided
+        platform = "manual"
+        if url:
+            parsed = MeetingURLParser.parse_url(url)
+            platform = parsed['platform']
+            console.print(f"[dim]Detected platform: {platform}[/dim]")
+        
+        # Show selected device
+        if device is not None:
+            try:
+                import sounddevice as sd
+                dev_info = sd.query_devices(device)
+                console.print(f"[cyan]Using audio device {device}: {dev_info['name']}[/cyan]")
+            except:
+                console.print(f"[yellow]Warning: Could not verify device {device}[/yellow]")
+        else:
+            console.print("[dim]Using default audio input device[/dim]")
+            console.print("[dim]Run with --list-devices to see all available microphones[/dim]")
+        
+        # Initialize listener
+        console.print(f"[cyan]Initializing transcription...[/cyan]")
+        listener = MeetingListener(
+            data_dir=f"{data_dir}/meetings",
+            transcription_model=model,
+            auto_summarize=not no_summary,
+            device_index=device
+        )
+        
+        if Confirm.ask("\nReady to start recording?"):
+            meeting_id = listener.start_meeting(
+                title=title,
+                platform=platform,
+                meeting_url=url
+            )
+            
+            console.print(f"\n[bold green]✓ Recording started![/bold green]")
+            console.print(f"[dim]Meeting ID: {meeting_id}[/dim]")
+            console.print("\n[yellow]PUSH-TO-TALK MODE:[/yellow]")
+            console.print("  • Type 'record' (or just 'r') and press Enter to START recording a segment")
+            console.print("  • Speak clearly for 3-5 seconds")
+            console.print("  • It will auto-stop and transcribe")
+            console.print("  • Type 'stop' to end the meeting\n")
+            console.print("[dim]Commands: 'record'/'r', 'pause', 'resume', 'stop', 'status'[/dim]\n")
+            
+            # Pause by default to prevent auto-recording
+            listener.pause_meeting()
+            
+            # Interactive control
+            session = PromptSession()
+            
+            while True:
+                try:
+                    command = session.prompt("\n[Command] > ")
+                    
+                    if command.lower() in ['record', 'r']:
+                        console.print("[cyan]🎙️  Recording for 5 seconds... SPEAK NOW![/cyan]")
+                        listener.resume_meeting()
+                        import time
+                        time.sleep(5)
+                        listener.pause_meeting()
+                        console.print("[dim]Processing...[/dim]")
+                        continue
+                    
+                    if command.lower() == 'stop':
+                        console.print("\n[cyan]Stopping recording...[/cyan]")
+                        result = listener.stop_meeting()
+                        
+                        console.print(Panel(
+                            f"[bold]Meeting Recorded![/bold]\n\n"
+                            f"Meeting ID: {result['meeting_id']}\n"
+                            f"Duration: {result['metadata']['duration_seconds']:.0f} seconds\n"
+                            f"Segments: {len(result['transcript']['segments'])}\n\n"
+                            f"[bold]Files saved:[/bold]\n"
+                            f"  • Transcript: {result['files']['transcript_text']}\n"
+                            f"  • Metadata: {result['files']['metadata']}",
+                            title="✓ Recording Complete",
+                            border_style="green"
+                        ))
+                        
+                        if result.get('summary'):
+                            console.print("\n[bold cyan]Summary:[/bold cyan]")
+                            summary = result['summary']
+                            console.print(f"\n{summary['summary']}\n")
+                            
+                            if summary['key_points']:
+                                console.print("[bold]Key Points:[/bold]")
+                                for point in summary['key_points']:
+                                    console.print(f"  • {point}")
+                            
+                            if summary['action_items']:
+                                console.print("\n[bold]Action Items:[/bold]")
+                                for item in summary['action_items']:
+                                    console.print(f"  • {item}")
+                        
+                        break
+                    
+                    elif command.lower() == 'pause':
+                        listener.pause_meeting()
+                        console.print("[yellow]Recording paused[/yellow]")
+                    
+                    elif command.lower() == 'resume':
+                        listener.resume_meeting()
+                        console.print("[green]Recording resumed[/green]")
+                    
+                    elif command.lower() == 'status':
+                        console.print(f"\n[bold]Recording Status:[/bold]")
+                        console.print(f"  Meeting: {listener.current_meeting.title if listener.current_meeting else 'None'}")
+                        console.print(f"  Status: {listener.status.value}")
+                        console.print(f"  Segments captured: {len(listener.transcript_segments)}")
+                        if listener.transcript_segments:
+                            console.print(f"\n[bold]Recent transcript:[/bold]")
+                            for seg in listener.transcript_segments[-3:]:
+                                console.print(f"  [{seg.timestamp.strftime('%H:%M:%S')}] {seg.text}")
+                        else:
+                            console.print("  [yellow]No transcript yet - keep speaking![/yellow]")
+                    
+                    else:
+                        console.print("[dim]Unknown command. Use: pause, resume, stop, status[/dim]")
+                
+                except KeyboardInterrupt:
+                    console.print("\n[yellow]Use 'stop' to end recording[/yellow]")
+                except EOFError:
+                    break
+        
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+        import traceback
+        traceback.print_exc()
+
+
+@cli.command('meeting-list')
+@click.option('--data-dir', default='./data', help='Data directory path')
+@click.option('--limit', default=10, help='Number of meetings to show')
+def meeting_list(data_dir: str, limit: int):
+    """List all recorded meetings."""
+    try:
+        listener = MeetingListener(data_dir=f"{data_dir}/meetings")
+        meetings = listener.list_meetings()
+        
+        if not meetings:
+            console.print("[yellow]No meetings recorded yet.[/yellow]")
+            return
+        
+        table = Table(title=f"Recorded Meetings (showing {min(len(meetings), limit)})")
+        table.add_column("Meeting ID", style="cyan")
+        table.add_column("Title", style="green")
+        table.add_column("Date", style="yellow")
+        table.add_column("Duration", style="magenta")
+        table.add_column("Platform", style="blue")
+        
+        for meeting in meetings[:limit]:
+            from datetime import datetime
+            start_time = datetime.fromisoformat(meeting['start_time'])
+            duration_min = meeting.get('duration_seconds', 0) / 60
+            
+            table.add_row(
+                meeting['meeting_id'],
+                meeting['title'][:40],
+                start_time.strftime('%Y-%m-%d %H:%M'),
+                f"{duration_min:.1f} min",
+                meeting.get('platform', 'unknown')
+            )
+        
+        console.print(table)
+        console.print(f"\n[dim]Total meetings: {len(meetings)}[/dim]")
+        
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+
+
+@cli.command('meeting-show')
+@click.argument('meeting_id')
+@click.option('--data-dir', default='./data', help='Data directory path')
+@click.option('--show-transcript', is_flag=True, help='Show full transcript')
+def meeting_show(meeting_id: str, data_dir: str, show_transcript: bool):
+    """Show details of a recorded meeting."""
+    try:
+        listener = MeetingListener(data_dir=f"{data_dir}/meetings")
+        
+        # Load meeting metadata
+        from pathlib import Path
+        import json
+        
+        meeting_dir = Path(f"{data_dir}/meetings") / meeting_id
+        
+        if not meeting_dir.exists():
+            console.print(f"[red]Meeting '{meeting_id}' not found.[/red]")
+            return
+        
+        # Load metadata
+        metadata_file = meeting_dir / "metadata.json"
+        with open(metadata_file, 'r') as f:
+            metadata = json.load(f)
+        
+        # Display metadata
+        from datetime import datetime
+        start_time = datetime.fromisoformat(metadata['start_time'])
+        end_time = datetime.fromisoformat(metadata['end_time']) if metadata.get('end_time') else None
+        duration_min = metadata.get('duration_seconds', 0) / 60
+        
+        console.print(Panel(
+            f"[bold]Meeting: {metadata['title']}[/bold]\n\n"
+            f"Meeting ID: {metadata['meeting_id']}\n"
+            f"Platform: {metadata['platform']}\n"
+            f"Start: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Duration: {duration_min:.1f} minutes\n" +
+            (f"Participants: {', '.join(metadata.get('participants', ['N/A']))}\n" if metadata.get('participants') else "") +
+            (f"URL: {metadata.get('meeting_url', 'N/A')}" if metadata.get('meeting_url') else ""),
+            title="Meeting Details",
+            border_style="cyan"
+        ))
+        
+        # Load and show summary if exists
+        summary_file = meeting_dir / "summary.json"
+        if summary_file.exists():
+            with open(summary_file, 'r') as f:
+                summary = json.load(f)
+            
+            console.print("\n[bold cyan]Summary:[/bold cyan]")
+            console.print(f"\n{summary['summary']}\n")
+            
+            if summary.get('key_points'):
+                console.print("[bold]Key Points:[/bold]")
+                for point in summary['key_points']:
+                    console.print(f"  • {point}")
+                console.print()
+            
+            if summary.get('decisions'):
+                console.print("[bold]Decisions Made:[/bold]")
+                for decision in summary['decisions']:
+                    console.print(f"  • {decision}")
+                console.print()
+            
+            if summary.get('action_items'):
+                console.print("[bold]Action Items:[/bold]")
+                for item in summary['action_items']:
+                    if isinstance(item, dict):
+                        task = item.get('task', '')
+                        owner = item.get('owner', 'TBD')
+                        console.print(f"  • {task} (Owner: {owner})")
+                    else:
+                        console.print(f"  • {item}")
+                console.print()
+        
+        # Show transcript if requested
+        if show_transcript:
+            transcript = listener.get_transcript(meeting_id)
+            if transcript:
+                console.print("\n[bold]Transcript:[/bold]\n")
+                for seg in transcript:
+                    time_str = seg.timestamp.strftime('%H:%M:%S')
+                    console.print(f"[dim][{time_str}][/dim] {seg.text}")
+        else:
+            console.print("\n[dim]Use --show-transcript to view full transcript[/dim]")
+        
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+
+
+@cli.command('meeting-summarize')
+@click.argument('meeting_id')
+@click.option('--data-dir', default='./data', help='Data directory path')
+@click.option('--provider', default='ollama', help='LLM provider for summary generation')
+def meeting_summarize(meeting_id: str, data_dir: str, provider: str):
+    """Generate or regenerate summary for a meeting using AI."""
+    try:
+        from src.llm_provider import get_llm_provider
+        
+        console.print(f"\n[cyan]Generating AI summary for meeting: {meeting_id}[/cyan]\n")
+        
+        # Load meeting data
+        listener = MeetingListener(data_dir=f"{data_dir}/meetings")
+        transcript = listener.get_transcript(meeting_id)
+        
+        if not transcript:
+            console.print(f"[red]No transcript found for meeting '{meeting_id}'[/red]")
+            return
+        
+        # Load metadata
+        from pathlib import Path
+        import json
+        
+        meeting_dir = Path(f"{data_dir}/meetings") / meeting_id
+        metadata_file = meeting_dir / "metadata.json"
+        
+        with open(metadata_file, 'r') as f:
+            metadata_dict = json.load(f)
+        
+        # Create metadata object
+        from src.meeting_listener import MeetingMetadata
+        from datetime import datetime
+        
+        metadata = MeetingMetadata(
+            meeting_id=metadata_dict['meeting_id'],
+            title=metadata_dict['title'],
+            start_time=datetime.fromisoformat(metadata_dict['start_time']),
+            end_time=datetime.fromisoformat(metadata_dict['end_time']) if metadata_dict.get('end_time') else None,
+            duration_seconds=metadata_dict.get('duration_seconds', 0),
+            participants=metadata_dict.get('participants', []),
+            platform=metadata_dict.get('platform', 'unknown'),
+            meeting_url=metadata_dict.get('meeting_url')
+        )
+        
+        # Initialize summarizer with user's profile
+        llm = get_llm_provider(provider)
+        
+        # Try to load cognitive profile
+        profile_manager = ProfileManager(data_dir)
+        cognitive_profile = profile_manager.load_profile()
+        
+        summarizer = MeetingSummarizer(
+            llm_provider=llm,
+            cognitive_profile=cognitive_profile
+        )
+        
+        console.print("[yellow]Generating summary with AI...[/yellow]")
+        summary = summarizer.generate_summary(transcript, metadata)
+        
+        # Save summary
+        summary_file = meeting_dir / "summary.json"
+        with open(summary_file, 'w') as f:
+            json.dump(summary.to_dict(), f, indent=2)
+        
+        # Display summary
+        console.print(Panel(
+            f"[bold cyan]Summary:[/bold cyan]\n\n{summary.summary}",
+            border_style="green"
+        ))
+        
+        if summary.key_points:
+            console.print("\n[bold]Key Points:[/bold]")
+            for point in summary.key_points:
+                console.print(f"  • {point}")
+        
+        if summary.decisions:
+            console.print("\n[bold]Decisions Made:[/bold]")
+            for decision in summary.decisions:
+                console.print(f"  • {decision}")
+        
+        if summary.action_items:
+            console.print("\n[bold]Action Items:[/bold]")
+            for item in summary.action_items:
+                if isinstance(item, dict):
+                    task = item.get('task', '')
+                    owner = item.get('owner', 'TBD')
+                    due = item.get('due', 'TBD')
+                    console.print(f"  • {task} (Owner: {owner}, Due: {due})")
+                else:
+                    console.print(f"  • {item}")
+        
+        if summary.next_steps:
+            console.print("\n[bold]Next Steps:[/bold]")
+            for step in summary.next_steps:
+                console.print(f"  • {step}")
+        
+        console.print(f"\n[dim]Sentiment: {summary.sentiment}[/dim]")
+        console.print(f"\n[green]✓ Summary saved to: {summary_file}[/green]\n")
+        
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+        import traceback
+        traceback.print_exc()
+
+
+@cli.command('meeting-devices')
+def meeting_devices():
+    """List all available audio input devices."""
+    try:
+        import sounddevice as sd
+        console.print("\n[bold cyan]🎙️ Available Audio Input Devices[/bold cyan]\n")
+        
+        devices = sd.query_devices()
+        default_in = sd.default.device[0]
+        
+        input_devices = []
+        for i, dev in enumerate(devices):
+            if dev['max_input_channels'] > 0:
+                input_devices.append((i, dev))
+        
+        if not input_devices:
+            console.print("[yellow]No input devices found.[/yellow]")
+            return
+        
+        table = Table(title="Audio Input Devices")
+        table.add_column("Index", style="cyan")
+        table.add_column("Device Name", style="green")
+        table.add_column("Channels", style="yellow")
+        table.add_column("Sample Rate", style="blue")
+        table.add_column("Status", style="magenta")
+        
+        for idx, dev in input_devices:
+            status = "✓ DEFAULT" if idx == default_in else ""
+            table.add_row(
+                str(idx),
+                dev['name'],
+                str(dev['max_input_channels']),
+                f"{dev['default_samplerate']:.0f} Hz",
+                status
+            )
+        
+        console.print(table)
+        console.print("\n[dim]To use a specific device:[/dim]")
+        console.print("  [cyan]python metapersona.py meeting-listen --device <index>[/cyan]\n")
+        
+    except ImportError:
+        console.print("[red]sounddevice not installed.[/red]")
+        console.print("Install with: pip install sounddevice\n")
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+
+
+@cli.command('meeting-setup')
+@click.option('--data-dir', default='./data', help='Data directory path')
+def meeting_setup(data_dir: str):
+    """Setup meeting listener with audio devices and integrations."""
+    try:
+        console.print("\n[bold cyan]🎙️ Meeting Listener Setup[/bold cyan]\n")
+        
+        # Check for required dependencies
+        console.print("[bold]Checking dependencies...[/bold]\n")
+        
+        deps = {
+            'sounddevice': 'Audio capture',
+            'numpy': 'Audio processing',
+            'whisper': 'Speech-to-text (OpenAI Whisper)',
+            'prompt_toolkit': 'Interactive CLI'
+        }
+        
+        missing = []
+        for module, description in deps.items():
+            try:
+                __import__(module)
+                console.print(f"[green]✓[/green] {module} - {description}")
+            except ImportError:
+                console.print(f"[red]✗[/red] {module} - {description}")
+                missing.append(module)
+        
+        if missing:
+            console.print(f"\n[yellow]Missing dependencies: {', '.join(missing)}[/yellow]")
+            console.print("\n[bold]Install with:[/bold]")
+            if 'whisper' in missing:
+                console.print("  pip install openai-whisper")
+            if 'sounddevice' in missing or 'numpy' in missing:
+                console.print("  pip install sounddevice numpy")
+            if 'prompt_toolkit' in missing:
+                console.print("  pip install prompt_toolkit")
+        else:
+            console.print("\n[green]✓ All dependencies installed![/green]")
+        
+        # List audio devices
+        console.print("\n[bold]Available Audio Devices:[/bold]\n")
+        
+        vad = VirtualAudioDevice()
+        devices = vad.list_devices()
+        
+        if devices:
+            table = Table()
+            table.add_column("Index", style="cyan")
+            table.add_column("Device Name", style="green")
+            table.add_column("Inputs", style="yellow")
+            table.add_column("Outputs", style="magenta")
+            
+            for device in devices:
+                table.add_row(
+                    str(device['index']),
+                    device['name'],
+                    str(device['inputs']),
+                    str(device['outputs'])
+                )
+            
+            console.print(table)
+        
+        # Setup virtual audio
+        console.print("\n[bold]Virtual Audio Device:[/bold]\n")
+        if vad.setup():
+            console.print(f"[green]✓ Found: {vad.device_name} (index: {vad.device_index})[/green]")
+        else:
+            console.print("[yellow]No virtual audio device detected.[/yellow]")
+            console.print("\n[dim]For best results, install a virtual audio device:[/dim]")
+            console.print("  • Windows: VB-CABLE (https://vb-audio.com/Cable/)")
+            console.print("  • macOS: BlackHole (https://github.com/ExistentialAudio/BlackHole)")
+            console.print("  • Linux: PulseAudio loopback module")
+        
+        # Future integrations
+        console.print("\n[bold]Future Integrations:[/bold]")
+        console.print("  • [dim]Automatic meeting joining (Zoom, Teams, Meet)[/dim]")
+        console.print("  • [dim]Calendar integration (Google, Outlook)[/dim]")
+        console.print("  • [dim]Speaker diarization (who said what)[/dim]")
+        console.print("  • [dim]Real-time meeting participation[/dim]")
+        
+        console.print("\n[green]✓ Setup complete![/green]")
+        console.print("\n[cyan]Try: python metapersona.py meeting-listen[/cyan]\n")
+        
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+
+
+@cli.command()
+@click.argument('question', nargs=-1, required=True)
+@click.option('--data-dir', default='./data', help='Data directory path')
+@click.option('--show-routing', is_flag=True, help='Show routing analysis')
+@click.option('--provider', default='openai', help='LLM provider to use')
+def ask_expert(question: tuple, data_dir: str, show_routing: bool, provider: str):
+    """Ask a question and get routed to the appropriate expert persona."""
+    question_text = ' '.join(question)
+    data_path = Path(data_dir)
+    personas_dir = data_path / "personas"
+    
+    # Check if personas exist
+    if not personas_dir.exists() or not list(personas_dir.glob("*.json")):
+        console.print("[yellow]No expert personas found.[/yellow]")
+        console.print("Run [cyan]python metapersona.py onboard[/cyan] first to create your personalized experts!\n")
+        return
+    
+    # Initialize router
+    router = QuestionRouter(personas_dir)
+    
+    # Route question
+    console.print(f"\n[bold cyan]Question:[/bold cyan] {question_text}\n")
+    selected_personas, analysis = router.route_question(question_text)
+    
+    # Show routing if requested
+    if show_routing:
+        explanation = router.get_routing_explanation(analysis, selected_personas)
+        console.print(Panel(explanation, title="Routing Decision", border_style="blue"))
+        console.print()
+    
+    # Get response from expert(s)
+    if not selected_personas:
+        console.print("[yellow]Could not determine expert domain. Using general knowledge.[/yellow]\n")
+        return
+    
+    # Initialize agent with expert persona
+    agent_manager = AgentManager(data_dir)
+    
+    if len(selected_personas) == 1:
+        # Single expert response
+        expert = selected_personas[0]
+        console.print(f"[bold green]→ {expert['name']}[/bold green] ({expert['role']})\n")
+        
+        # Create agent with expert's system prompt
+        agent = agent_manager.initialize_agent(provider_name=provider)
+        
+        # Override system prompt with expert's prompt
+        expert_prompt = expert['system_prompt']
+        
+        # Get response
+        console.print("[dim]Thinking...[/dim]\n")
+        try:
+            # This is a simplified version - you'd integrate with your actual LLM calling code
+            console.print(f"[cyan]{expert['name']}:[/cyan]")
+            console.print(f"\n[dim]Note: Full LLM integration would go here[/dim]")
+            console.print(f"[dim]Expert would respond using: {expert['role']}[/dim]")
+            console.print(f"[dim]With expertise in: {', '.join(expert['expertise_areas'][:3])}[/dim]")
+            console.print(f"[dim]Understanding your context: {expert['user_context']['profession']}[/dim]\n")
+        except Exception as e:
+            console.print(f"[red]Error getting response: {e}[/red]")
+    
+    else:
+        # Collaborative response from multiple experts
+        console.print(f"[bold green]→ Collaborative Response[/bold green] ({len(selected_personas)} experts)\n")
+        
+        for expert in selected_personas:
+            console.print(f"[cyan]• {expert['name']}[/cyan] - {expert['role']}")
+        
+        console.print(f"\n[dim]Multi-expert collaboration would synthesize answers here[/dim]")
+        console.print(f"[dim]Each expert brings their domain knowledge while understanding your context[/dim]\n")
 
 
 if __name__ == '__main__':

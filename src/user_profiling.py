@@ -296,81 +296,72 @@ class UserProfilingSystem:
         console = Console()
         
         console.print("\n[bold cyan]🎭 Welcome to MetaPersona![/bold cyan]\n")
-        console.print("[bold]I'm here to learn about YOU so I can adapt to your needs.[/bold]\n")
-        console.print("I'll ask you some questions about:")
-        console.print("  • Your profession and work")
-        console.print("  • Your daily tasks and tools")
-        console.print("  • Your technical skills and interests")
-        console.print("  • How you prefer to communicate\n")
-        console.print("[dim]Your answers will help me:[/dim]")
-        console.print("[dim]  ✓ Load relevant skills for your profession[/dim]")
-        console.print("[dim]  ✓ Adapt my communication style to match yours[/dim]")
-        console.print("[dim]  ✓ Prioritize the right agents for your needs[/dim]")
-        console.print("[dim]  ✓ Understand your daily workflow and context[/dim]\n")
-        console.print("[yellow]Let's get started! I want to learn about you.[/yellow]\n")
         
         profile = UserProfile(user_id=user_id)
-        responses = {}
         
-        for question in self.onboarding_questions:
-            if not interactive:
-                # Return questions for non-interactive mode
-                continue
-            
-            console.print(f"[bold]{question.question}[/bold]")
-            
-            if question.question_type == "text":
-                answer = Prompt.ask("  ")
-                responses[question.id] = answer
-                
-            elif question.question_type == "choice":
-                console.print("[dim]Options:[/dim]")
-                for i, opt in enumerate(question.options, 1):
-                    console.print(f"  {i}. {opt}")
-                choice = Prompt.ask("  Select", choices=[str(i) for i in range(1, len(question.options) + 1)])
-                answer = question.options[int(choice) - 1]
-                responses[question.id] = answer
-                
-            elif question.question_type == "multi_choice":
-                console.print("[dim]Select all that apply (comma-separated numbers):[/dim]")
-                for i, opt in enumerate(question.options, 1):
-                    console.print(f"  {i}. {opt}")
-                choices = Prompt.ask("  Select").split(",")
-                answers = [question.options[int(c.strip()) - 1] for c in choices if c.strip().isdigit()]
-                responses[question.id] = answers
-                
-            elif question.question_type == "tags":
-                answer = Prompt.ask("  ")
-                tags = [t.strip() for t in answer.split(",") if t.strip()]
-                responses[question.id] = tags
-            
-            console.print()
+        # ONE QUESTION ONLY
+        console.print("[bold]What do you do and what do you like to work on?[/bold]")
+        console.print("[dim]Example: I'm a software developer and day trader, I code in Python/JS and use TradingView[/dim]\n")
         
-        # Map responses to profile
-        profile.profession = responses.get("profession", "").lower()
-        profile.industry = responses.get("industry", "")
-        profile.job_level = responses.get("job_level", "").lower().replace(" ", "_").replace("/", "_")
-        profile.technical_level = responses.get("technical_level", "").lower()
-        profile.daily_tasks = responses.get("daily_tasks", [])
-        profile.tools_used = responses.get("tools_used", [])
+        user_input = Prompt.ask("").strip()
+        user_lower = user_input.lower()
         
-        prog_langs = responses.get("programming_languages", [])
-        if prog_langs and prog_langs[0].lower() != "none":
-            profile.programming_languages = prog_langs
+        # Parse the single response
+        profile.profession = user_input
         
-        profile.hobbies = responses.get("hobbies", [])
-        profile.needed_skills = responses.get("needed_skills", [])
+        # Extract programming languages
+        langs = []
+        common_langs = {
+            'python': 'Python', 'javascript': 'JavaScript', 'js': 'JS', 
+            'typescript': 'TypeScript', 'ts': 'TS', 'java': 'Java',
+            'c++': 'C++', 'c#': 'C#', 'go': 'Go', 'rust': 'Rust',
+            'ruby': 'Ruby', 'php': 'PHP', 'swift': 'Swift', 'kotlin': 'Kotlin'
+        }
+        for key, value in common_langs.items():
+            if key in user_lower:
+                langs.append(value)
+        profile.programming_languages = list(set(langs))
         
-        comm_style = responses.get("communication_style", "Professional & Formal")
-        if "casual" in comm_style.lower():
-            profile.preferred_communication_style = "casual"
-        elif "technical" in comm_style.lower():
-            profile.preferred_communication_style = "technical"
-        else:
-            profile.preferred_communication_style = "professional"
+        # Extract tools
+        tools = []
+        common_tools = {
+            'vs code': 'VS Code', 'vscode': 'VS Code', 'pycharm': 'PyCharm',
+            'git': 'Git', 'docker': 'Docker', 'figma': 'Figma',
+            'tradingview': 'TradingView', 'jira': 'Jira', 'notion': 'Notion',
+            'slack': 'Slack', 'project x': 'Project X'
+        }
+        for key, value in common_tools.items():
+            if key in user_lower:
+                tools.append(value)
+        profile.tools_used = list(set(tools))
         
-        freq = responses.get("help_frequency", "Regularly")
-        profile.help_frequency = freq.lower()
+        # Extract activities
+        activities = []
+        common_activities = ['trading', 'coding', 'development', 'design', 'writing', 
+                            'data analysis', 'machine learning', 'content creation', 
+                            'video editing', 'bowling', 'gaming']
+        for activity in common_activities:
+            if activity in user_lower:
+                activities.append(activity)
+        profile.daily_tasks = activities if activities else ['general work']
+        profile.hobbies = activities
+        profile.needed_skills = activities if activities else ['general assistance']
+        
+        # Extract industry from common keywords
+        industries = []
+        if any(word in user_lower for word in ['software', 'developer', 'coding', 'tech', 'programming']):
+            industries.append('Technology/Software')
+        if any(word in user_lower for word in ['trading', 'trader', 'finance', 'stocks', 'crypto']):
+            industries.append('Finance/Banking')
+        if any(word in user_lower for word in ['content', 'creator', 'video', 'youtube']):
+            industries.append('Creative/Arts')
+        profile.industry = industries if industries else ['Other']
+        
+        # Set smart defaults
+        profile.job_level = 'entry_level'
+        profile.technical_level = 'intermediate'
+        profile.preferred_communication_style = 'professional'
+        profile.help_frequency = 'regularly'
         
         # Auto-load appropriate skill packs
         profile.loaded_skill_packs = self._determine_skill_packs(profile)

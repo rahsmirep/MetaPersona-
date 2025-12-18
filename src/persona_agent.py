@@ -50,14 +50,34 @@ class PersonaAgent:
 
 Remember: You ARE this person. Think, write, and decide as they would. Maintain consistency with their established patterns and preferences.
 
+**Web Search Capability:**
+You have the ability to search the web for real-time information when needed.
+- Use web search for: current events, factual information, recent data, verification of facts
+- When user asks about current/recent topics or needs verified sources
+- To find up-to-date information beyond your training data
+
+**CRITICAL - After Web Search:**
+- You MUST ONLY cite information that appears in the search results snippets
+- DO NOT add any details not explicitly mentioned in the snippets
+- DO NOT make up product names, dates, prices, or specifications
+- If search results don't contain specific info, you MUST say "The search results don't mention..."
+- Copy information word-for-word from snippets when possible
+- Always include the source URL for every claim
+- If you cannot answer from the snippets alone, say so explicitly
+
 **When to use skills:**
-- ONLY use skills for concrete actions like file operations, calculations, or web searches
-- DO NOT use skills for conversational questions, explanations, or philosophical discussions
+- ONLY use skills for concrete actions like web searches, file operations, or calculations
+- USE web_search when you need current information or sources
+- DO NOT use skills for conversational questions or philosophical discussions
 - For questions about yourself or conceptual topics, respond naturally in conversation
 
 **How to use skills:**
 When you need to perform a concrete action, respond with JSON:
 {{"action": "use_skill", "skill": "skill_name", "parameters": {{"param": "value"}}}}
+
+Available skills:
+- web_search: {{"action": "use_skill", "skill": "web_search", "parameters": {{"query": "search terms", "num_results": 5}}}}
+- file_read, file_write, calculate
 
 For everything else, respond naturally as this person would in conversation."""
         
@@ -140,28 +160,64 @@ For everything else, respond naturally as this person would in conversation."""
     def _handle_skill_request(self, response: str) -> str:
         """Check if response contains a skill request and execute it."""
         try:
-            # Try to parse as JSON
-            if response.strip().startswith("{") and "use_skill" in response:
-                import json
-                request = json.loads(response)
-                
-                if request.get("action") == "use_skill":
-                    skill_name = request.get("skill")
-                    parameters = request.get("parameters", {})
+            import json
+            import re
+            
+            # Check if response contains a JSON skill request
+            if "use_skill" in response:
+                # Try to extract JSON from response (may have text before/after)
+                # Match balanced braces to handle nested parameters
+                json_match = re.search(r'\{[^{}]*"action"[^{}]*"use_skill"[^{}]*\{[^{}]*\}[^{}]*\}', response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    # Clean up any formatting issues
+                    json_str = json_str.replace('\n', ' ').replace('  ', ' ')
+                    request = json.loads(json_str)
                     
-                    # Execute skill
-                    result = self.skill_manager.execute_skill(skill_name, **parameters)
-                    
-                    if result.success:
-                        return f"✓ Skill executed successfully:\n{result.data}"
-                    else:
-                        # If skill fails, return normal response without skill
-                        # This prevents disrupting the conversation
-                        return response.split('\n')[0] if '\n' in response else response
-        except:
+                    if request.get("action") == "use_skill":
+                        skill_name = request.get("skill")
+                        parameters = request.get("parameters", {})
+                        
+                        print(f"\n🔧 Executing skill: {skill_name}")
+                        
+                        # Handle web search specially
+                        if skill_name == "web_search":
+                            return self._execute_web_search(parameters.get("query", ""), parameters.get("num_results", 5))
+                        
+                        # Execute other skills
+                        result = self.skill_manager.execute_skill(skill_name, **parameters)
+                        
+                        if result.success:
+                            return f"✓ Skill executed successfully:\n{result.data}"
+                        else:
+                            # If skill fails, return normal response without skill
+                            # This prevents disrupting the conversation
+                            return response.split('\n')[0] if '\n' in response else response
+        except Exception as e:
+            print(f"⚠️ Skill parsing error: {e}")
             pass  # Not a skill request, return original response
         
         return response
+    
+    def _execute_web_search(self, query: str, num_results: int = 5) -> str:
+        """Execute a web search and format results."""
+        from .web_search import search_web
+        
+        results = search_web(query, num_results)
+        
+        if not results:
+            return f"I searched for '{query}' but couldn't find any results."
+        
+        # Format results with clear instruction to only cite what's shown
+        formatted = f"Here are the search results for '{query}'. ONLY use information from these results:\n\n"
+        for i, result in enumerate(results, 1):
+            formatted += f"{i}. **{result['title']}**\n"
+            formatted += f"   {result['snippet']}\n"
+            formatted += f"   URL: {result['url']}\n\n"
+        
+        formatted += "\n[INSTRUCTION: Answer the user's question using ONLY the information above. Do not add details not present in these snippets. If the snippets don't contain specific information, say so.]"
+        
+        return formatted
     
     def make_decision(self, decision_prompt: str, options: List[str]) -> Dict:
         """Make a decision based on user's decision patterns."""

@@ -48,6 +48,14 @@ MetaPersona creates a personal AI agent that:
 - **Intelligent Routing**: Automatic task routing to best agent
 - **Agent Registry**: Centralized agent management
 - **Task Router**: Confidence-based agent selection
+
+### 🎙️ Meeting Listener (NEW!)
+- **Real-time Transcription**: Capture and transcribe meetings as they happen
+- **AI Summaries**: Generate structured summaries with key points, decisions, and action items
+- **Multiple Platforms**: Support for Zoom, Teams, Google Meet, and more
+- **Personalized Output**: Summaries in YOUR writing style and communication preferences
+- **Meeting Management**: List, view, and search past meeting recordings
+- **Modular Design**: Extensible for calendar integration and autonomous participation
 - **Agent Collaboration**: Multiple agents working together
 - **Custom Agents**: Easy-to-extend BaseAgent class
 
@@ -139,6 +147,35 @@ List available skills:
 ```powershell
 python metapersona.py skills
 ```
+
+### Meeting Listener Commands
+
+**Setup and verify Meeting Listener:**
+```powershell
+python metapersona.py meeting-setup
+```
+
+**Start recording a meeting:**
+```powershell
+python metapersona.py meeting-listen --title "Team Standup"
+```
+
+**List recorded meetings:**
+```powershell
+python metapersona.py meeting-list
+```
+
+**View meeting details and summary:**
+```powershell
+python metapersona.py meeting-show meeting_20241218_143022 --show-transcript
+```
+
+**Generate AI summary:**
+```powershell
+python metapersona.py meeting-summarize meeting_20241218_143022
+```
+
+See [MEETING_LISTENER.md](MEETING_LISTENER.md) for complete documentation.
 
 Get detailed information about a skill:
 ```powershell
@@ -410,7 +447,9 @@ python metapersona.py multi-agent-chat
 
 - **[README.md](README.md)** - Main documentation (this file)
 - **[SKILLS.md](SKILLS.md)** - Modular skills system guide
-- **[MULTI_AGENT.md](MULTI_AGENT.md)** - Multi-agent system guide (NEW!)
+- **[MULTI_AGENT.md](MULTI_AGENT.md)** - Multi-agent system guide
+- **[MEETING_LISTENER.md](MEETING_LISTENER.md)** - Meeting Listener complete guide (NEW!)
+- **[MEETING_QUICKSTART.md](MEETING_QUICKSTART.md)** - Meeting Listener 5-minute start (NEW!)
 - **[QUICKSTART.md](QUICKSTART.md)** - Quick 5-minute setup
 - **[SETUP.md](SETUP.md)** - Detailed setup and troubleshooting
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture diagrams
