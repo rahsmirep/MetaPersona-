@@ -81,6 +81,7 @@ class QuestionRouter:
     def __init__(self, personas_dir: Path):
         self.personas_dir = personas_dir
         self.available_personas = self._load_available_personas()
+        self.profession_experts = self._load_profession_experts()
     
     def _load_available_personas(self) -> Dict[str, Dict[str, Any]]:
         """Load all available expert personas."""
@@ -91,11 +92,27 @@ class QuestionRouter:
         for persona_file in self.personas_dir.glob("*.json"):
             with open(persona_file, 'r') as f:
                 persona_data = json.load(f)
+                # Skip profession experts (handled separately)
+                if persona_data.get('agent_type') == 'profession_expert':
+                    continue
                 domain = persona_data.get('domain')
                 if domain:
                     personas[domain] = persona_data
         
         return personas
+    
+    def _load_profession_experts(self) -> List[Dict[str, Any]]:
+        """Load profession expert agents."""
+        experts = []
+        if not self.personas_dir.exists():
+            return experts
+        
+        for persona_file in self.personas_dir.glob("profession_expert_*.json"):
+            with open(persona_file, 'r') as f:
+                expert_data = json.load(f)
+                experts.append(expert_data)
+        
+        return experts
     
     def analyze_question(self, question: str) -> QuestionAnalysis:
         """Analyze a question to determine routing."""
@@ -150,22 +167,59 @@ class QuestionRouter:
     def route_question(self, question: str) -> Tuple[List[Dict[str, Any]], QuestionAnalysis]:
         """Route a question to appropriate expert persona(s)."""
         analysis = self.analyze_question(question)
+        question_lower = question.lower()
         
         selected_personas = []
         
-        # Add primary expert
-        if analysis.primary_domain and analysis.primary_domain in self.available_personas:
-            selected_personas.append(self.available_personas[analysis.primary_domain])
+        # First, check profession experts (highest priority for professional questions)
+        profession_match = None
+        best_match_score = 0
         
-        # Add secondary experts if collaboration needed
-        if analysis.requires_collaboration:
-            for domain in analysis.secondary_domains:
-                if domain in self.available_personas:
-                    selected_personas.append(self.available_personas[domain])
+        for expert in self.profession_experts:
+            # Check if question matches profession keywords
+            keywords = expert.get('keywords', [])
+            match_score = 0
+            
+            for kw in keywords:
+                kw_lower = kw.lower()
+                # Exact match
+                if kw_lower in question_lower:
+                    match_score += 2
+                # Partial word match (e.g., "trading" matches "quantitative trader")
+                elif any(word in question_lower for word in kw_lower.split() if len(word) > 3):
+                    match_score += 1
+            
+            if match_score > best_match_score:
+                best_match_score = match_score
+                profession_match = expert
         
-        # If no specific domain detected, return all personas for general question
-        if not selected_personas:
-            selected_personas = list(self.available_personas.values())
+        # If profession expert matched with reasonable confidence
+        if profession_match and best_match_score >= 1:
+            selected_personas.append(profession_match)
+            # Update analysis with profession domain
+            analysis.primary_domain = profession_match.get('profession_name', 'profession')
+            analysis.confidence = min(1.0, best_match_score / 3.0)
+            
+            # Only add domain experts if collaboration is clearly needed
+            if analysis.requires_collaboration and len(analysis.secondary_domains) > 0:
+                for domain in analysis.secondary_domains[:1]:  # Max 1 additional expert
+                    if domain in self.available_personas:
+                        selected_personas.append(self.available_personas[domain])
+        else:
+            # Standard domain routing
+            # Add primary expert
+            if analysis.primary_domain and analysis.primary_domain in self.available_personas:
+                selected_personas.append(self.available_personas[analysis.primary_domain])
+            
+            # Add secondary experts if collaboration needed
+            if analysis.requires_collaboration:
+                for domain in analysis.secondary_domains:
+                    if domain in self.available_personas:
+                        selected_personas.append(self.available_personas[domain])
+            
+            # If no specific domain detected, return all personas for general question
+            if not selected_personas:
+                selected_personas = list(self.available_personas.values())
         
         return selected_personas, analysis
     

@@ -13,6 +13,10 @@ from rich.table import Table
 from rich.markdown import Markdown
 from rich.prompt import Prompt, Confirm
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -22,7 +26,7 @@ from src.persona_agent import AgentManager
 from src.memory_loop import MemoryLoop
 from src.cognitive_profile import ProfileManager
 from src.skills import SkillManager
-from src.skills.builtin import CalculatorSkill, FileOpsSkill, WebSearchSkill
+from src.skills.builtin import CalculatorSkill, FileOpsSkill, WebSearchSkill, TimezoneSkill, FlightSkill
 from src.personalized_agents import (
     PersonalizedResearchAgent,
     PersonalizedCodeAgent, 
@@ -444,6 +448,8 @@ def skills(data_dir: str):
         skill_manager.registry.register(CalculatorSkill())
         skill_manager.registry.register(FileOpsSkill())
         skill_manager.registry.register(WebSearchSkill())
+        skill_manager.registry.register(TimezoneSkill())
+        skill_manager.registry.register(FlightSkill())
         
         skills_list = skill_manager.list_available_skills()
         
@@ -482,6 +488,8 @@ def skill_info(skill_name: str, data_dir: str):
         skill_manager.registry.register(CalculatorSkill())
         skill_manager.registry.register(FileOpsSkill())
         skill_manager.registry.register(WebSearchSkill())
+        skill_manager.registry.register(TimezoneSkill())
+        skill_manager.registry.register(FlightSkill())
         
         info = skill_manager.get_skill_info(skill_name)
         
@@ -522,6 +530,8 @@ def use_skill(skill_name: str, data_dir: str, params):
         skill_manager.registry.register(CalculatorSkill())
         skill_manager.registry.register(FileOpsSkill())
         skill_manager.registry.register(WebSearchSkill())
+        skill_manager.registry.register(TimezoneSkill())
+        skill_manager.registry.register(FlightSkill())
         
         # Parse parameters
         parameters = {}
@@ -1954,6 +1964,204 @@ def ask_expert(question: tuple, data_dir: str, show_routing: bool, provider: str
         
         console.print(f"\n[dim]Multi-expert collaboration would synthesize answers here[/dim]")
         console.print(f"[dim]Each expert brings their domain knowledge while understanding your context[/dim]\n")
+
+
+@cli.command('onboard-profession')
+@click.option('--provider', help='LLM provider (openai/anthropic/ollama)')
+@click.option('--data-dir', default='./data', help='Data directory path')
+@click.option('--interactive', is_flag=True, help='Enable follow-up clarification questions')
+@click.option('--file', 'input_file', type=click.Path(exists=True), help='Load profession description from file')
+@click.option('--skip-expansion', is_flag=True, help='Skip initial knowledge expansion (faster)')
+def onboard_profession_command(provider: str, data_dir: str, interactive: bool, input_file: str, skip_expansion: bool):
+    """Onboard your profession for context-aware assistance."""
+    from src.profession import UniversalProfessionSystem
+    from src.llm_provider import get_llm_provider
+    
+    console.print("\n[bold cyan]🎓 Profession Onboarding[/bold cyan]\n")
+    
+    # Get user ID from profile
+    profile_manager = ProfileManager(data_dir)
+    cognitive_profile = profile_manager.load_profile()
+    
+    if not cognitive_profile:
+        console.print("[red]No profile found! Run 'python metapersona.py init' first.[/red]")
+        return
+    
+    user_id = cognitive_profile.user_id
+    
+    # Initialize system
+    llm = get_llm_provider(provider)
+    google_api_key = os.getenv('GOOGLE_API_KEY')
+    google_cse_id = os.getenv('GOOGLE_SEARCH_ENGINE_ID')
+    
+    upus = UniversalProfessionSystem(
+        llm_provider=llm,
+        data_dir=Path(data_dir),
+        google_api_key=google_api_key,
+        google_cse_id=google_cse_id
+    )
+    
+    # Get profession description
+    if input_file:
+        with open(input_file, 'r') as f:
+            profession_input = f.read()
+        console.print(f"[green]✓ Loaded description from {input_file}[/green]\n")
+    else:
+        console.print("[bold]Describe your profession in detail:[/bold]")
+        console.print("[dim]Include: job title, responsibilities, daily tasks, tools, environment,[/dim]")
+        console.print("[dim]constraints, safety rules, and decision-making approach.[/dim]\n")
+        console.print("[yellow]Tip: The more detailed, the better! Press Ctrl+D (Unix) or Ctrl+Z (Windows) when done.[/yellow]\n")
+        
+        lines = []
+        console.print("[cyan]> [/cyan]", end="")
+        try:
+            while True:
+                line = input()
+                lines.append(line)
+        except EOFError:
+            pass
+        
+        profession_input = '\n'.join(lines)
+        
+        if not profession_input.strip():
+            console.print("[red]No input provided. Exiting.[/red]")
+            return
+    
+    console.print("\n[yellow]Processing profession description...[/yellow]")
+    
+    try:
+        # Onboard the profession
+        schema = upus.onboard_profession(
+            user_input=profession_input,
+            user_id=user_id,
+            interactive=interactive
+        )
+        
+        console.print("\n[bold green]✓ Profession Schema Created![/bold green]\n")
+        
+        # Display summary
+        summary = upus.get_profession_summary(user_id)
+        console.print(Panel(summary, title="Profession Summary", border_style="green"))
+        
+        # Show confidence levels
+        high_areas = len(schema.knowledge_confidence.high_confidence_areas)
+        medium_areas = len(schema.knowledge_confidence.medium_confidence_areas)
+        needs_exp = len(schema.knowledge_confidence.needs_expansion)
+        
+        confidence_table = Table(title="Knowledge Confidence")
+        confidence_table.add_column("Level", style="cyan")
+        confidence_table.add_column("Areas", style="white")
+        confidence_table.add_row("High", str(high_areas), style="green")
+        confidence_table.add_row("Medium", str(medium_areas), style="yellow")
+        confidence_table.add_row("Needs Expansion", str(needs_exp), style="red")
+        
+        console.print(confidence_table)
+        console.print()
+        
+        console.print(f"[green]✓ Profession saved to: data/professions/{schema.profession_id}.json[/green]")
+        
+        # Auto-generate profession expert agent
+        console.print("\n[cyan]🤖 Generating Profession Expert Agent...[/cyan]")
+        
+        from src.personalized_agents import PersonalizedProfessionAgent
+        
+        profession_expert = PersonalizedProfessionAgent(
+            agent_id=f"profession_expert_{schema.profession_name.lower().replace(' ', '_')}",
+            role=f"{schema.profession_name} Expert",
+            description=f"Expert in {schema.profession_name} ({schema.industry}) with your personal style and professional knowledge",
+            cognitive_profile=cognitive_profile,
+            llm_provider=llm,
+            profession_schema=schema
+        )
+        
+        # Save expert persona for routing
+        expert_data = {
+            "agent_id": profession_expert.agent_id,
+            "agent_type": "profession_expert",
+            "role": profession_expert.role,
+            "profession_name": schema.profession_name,
+            "industry": schema.industry,
+            "description": profession_expert.description,
+            "capabilities": [
+                {
+                    "name": cap.name,
+                    "description": cap.description,
+                    "confidence": cap.confidence,
+                    "examples": cap.examples
+                }
+                for cap in profession_expert.capabilities
+            ],
+            "keywords": [
+                schema.profession_name.lower(),
+                schema.industry.lower()
+            ] + schema.tools_equipment.software[:10] + list(schema.terminology.jargon.keys())[:20],
+            "user_id": user_id,
+            "profession_schema_id": schema.profession_id
+        }
+        
+        # Save to personas directory
+        personas_dir = Path(data_dir) / "personas"
+        personas_dir.mkdir(exist_ok=True)
+        expert_file = personas_dir / f"{profession_expert.agent_id}.json"
+        
+        import json
+        with open(expert_file, 'w') as f:
+            json.dump(expert_data, f, indent=2)
+        
+        console.print(f"[green]✓ Profession Expert created: {profession_expert.role}[/green]")
+        console.print(f"[green]✓ Expert saved to: {expert_file}[/green]")
+        
+        console.print(f"\n[bold cyan]🎉 Setup Complete![/bold cyan]")
+        console.print(f"\n[dim]Your profession expert will now handle queries related to:[/dim]")
+        console.print(f"[dim]  • {schema.profession_name} topics[/dim]")
+        console.print(f"[dim]  • {schema.industry} industry questions[/dim]")
+        console.print(f"[dim]  • Tools: {', '.join(schema.tools_equipment.software[:3])}...[/dim]")
+        console.print(f"\n[dim]Try: python metapersona.py route-task \"<your professional question>\"[/dim]\n")
+        
+    except Exception as e:
+        console.print(f"[red]Error during onboarding: {e}[/red]")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+
+
+
+@cli.command('show-profession')
+@click.option('--data-dir', default='./data', help='Data directory path')
+@click.option('--format', 'output_format', default='summary', type=click.Choice(['json', 'summary']), help='Output format')
+def show_profession_command(data_dir: str, output_format: str):
+    """Display your current profession schema."""
+    from src.profession import UniversalProfessionSystem
+    from src.llm_provider import get_llm_provider
+    
+    # Get user ID from profile
+    profile_manager = ProfileManager(data_dir)
+    cognitive_profile = profile_manager.load_profile()
+    
+    if not cognitive_profile:
+        console.print("[red]No profile found! Run 'python metapersona.py init' first.[/red]")
+        return
+    
+    user_id = cognitive_profile.user_id
+    
+    # Initialize system
+    llm = get_llm_provider()
+    upus = UniversalProfessionSystem(
+        llm_provider=llm,
+        data_dir=Path(data_dir)
+    )
+    
+    try:
+        schema = upus.load_profession_schema(user_id)
+        
+        if output_format == 'json':
+            console.print(schema.to_json())
+        else:
+            summary = upus.get_profession_summary(user_id)
+            console.print(Panel(summary, title=f"Profession: {schema.profession_name}", border_style="cyan"))
+            
+    except FileNotFoundError:
+        console.print(f"[red]No profession found for user: {user_id}[/red]")
+        console.print("[yellow]Run 'python metapersona.py onboard-profession' first.[/yellow]")
 
 
 if __name__ == '__main__':

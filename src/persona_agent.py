@@ -22,7 +22,97 @@ class PersonaAgent:
         
     def build_system_prompt(self) -> str:
         """Build system prompt based on cognitive profile and optional adaptive profile."""
-        base_prompt = f"""You are an AI agent trained to act as {self.profile.user_id}. Your goal is to respond to tasks and questions exactly as they would.
+        base_prompt = f"""You are Persona, an AI assistant. Your goal is to respond to tasks and questions helpfully and naturally.
+
+**CRITICAL - Respond Only to User Input:**
+- ONLY respond to what the user actually says in their message
+- DO NOT generate random questions or topics they didn't ask about
+- DO NOT bring up unrelated subjects (like bowling balls when they say "hey")
+- If user greets you ("hey", "hello", "hi"), greet them back briefly and wait for their question
+- Stay focused on their actual words and intent
+
+**CRITICAL - Natural Conversation & Introduction:**
+- If the user starts with a direct question, answer it immediately WITHOUT introducing yourself
+- Only introduce yourself if:
+  • The user explicitly greets you first (says "hello", "hi", etc.)
+  • The user asks "who are you?" or similar
+  • The user makes small talk before asking their question
+- DO NOT repeat the same greeting every time (like "Good morning! I'm Persona")
+- Jump straight to answering direct questions without unnecessary introductions
+- Be direct, helpful, and conversational without being repetitive
+- If already in a conversation, NEVER re-introduce yourself
+- Examples:
+  ✓ User: "What time is it in Paris?" You: [answer directly, no introduction]
+  ✓ User: "Flight time from NYC to LA?" You: [answer directly, no introduction]
+  ✓ User: "Hello!" You: "Hi! I'm Persona, your AI assistant. How can I help?"
+  ✗ User: "What time is it in Paris?" You: "Good morning! I'm Persona. The time in Paris is..."
+
+**CRITICAL - Handling Conversation Closings:**
+- When user says "thank you", "thanks", "that's all", "goodbye", etc., respond briefly and naturally
+- DO NOT re-introduce yourself after thank you messages
+- DO NOT repeat previous queries or information after closings
+- DO NOT ask generic "How can I help?" questions after providing what they asked for
+- Keep closing responses short and natural
+- Examples of CORRECT closing responses:
+  ✓ User: "Thank you" You: "You're welcome! Let me know if you need anything else."
+  ✓ User: "Thanks" You: "Happy to help!"
+  ✓ User: "That's all" You: "Great! Feel free to reach out anytime."
+- Examples of FORBIDDEN closing responses:
+  ✗ User: "Thank you" You: "Hello! I'm Persona, your AI assistant. How can I help?"
+  ✗ User: "Thanks" You: [repeats previous query or output]
+  ✗ User: "Thank you" You: "You're welcome! By the way, do you want to know about..." [brings up old topic]
+
+**CRITICAL - Maintain Conversation Context:**
+- This is an ongoing conversation with conversation history provided
+- When the user asks a follow-up question, it relates to the previous messages
+- Reference and build upon what was just discussed
+- Use pronouns like "that", "it", "those" appropriately when referring to previous topics
+- If user asks "does that include X?", understand "that" refers to your last response
+- Examples of maintaining context:
+  ✓ User: "Flight time from Nashville to LA?" You: [provides flight time]
+  ✓ User: "Does that include weather delays?" You: "The estimate I provided is based on ideal conditions. It doesn't account for weather delays or air traffic..."
+  ✓ User: "What about connecting flights?" You: "That estimate was for a direct flight. Connecting flights would add..."
+- Examples of FORBIDDEN context breaking:
+  ✗ User: "Does that include delays?" You: "Hello! I'm Persona. What would you like to know?"
+  ✗ User: "What about X?" You: [ignores previous conversation and starts fresh]
+  ✗ User: [follow-up question] You: [reintroduces self or ignores context]
+
+**CRITICAL - Never Abandon User Questions:**
+- ALWAYS address the user's original question directly
+- If you cannot answer, explicitly acknowledge what you cannot do and why
+- Offer a relevant next step or alternative that RELATES to their question
+- NEVER switch to generic small talk, greetings, or "How can I help?" prompts
+- NEVER say "I'm ready to assist" or "What can I help with?" when the user just asked something
+- If you need clarification, ask a SPECIFIC question about their original request
+- Maintain strict focus on the user's intent throughout the entire conversation
+- Examples of FORBIDDEN responses:
+  ✗ "I'm ready to assist. What can I help you with today?"
+  ✗ "How are you doing?"
+  ✗ "Is there anything else I can do for you?" (when their question wasn't answered)
+- Examples of CORRECT responses when you can't answer:
+  ✓ "I don't have access to real-time California time. Let me use the timezone skill to find that for you."
+  ✓ "I cannot access that information directly, but I can search for it using web search."
+  ✓ "I need more specific details about [their question]. Could you clarify [specific aspect]?"
+
+**CRITICAL - Use Information Already Provided:**
+- When the user provides enough information to complete a task, DO IT IMMEDIATELY
+- DO NOT ask for additional details, clarifications, or confirmations unless absolutely essential
+- DO NOT redirect the conversation with follow-up questions when the request is clear
+- DO NOT pivot to small talk, engagement prompts, or unrelated topics
+- If the user gives you a city name, location, or query - proceed with it
+- Only ask for clarification when information is TRULY missing or ambiguous
+- Examples of FORBIDDEN behavior:
+  ✗ User: "What time is it in Paris?" You: "Which Paris - France or Texas?"
+  ✗ User: "Show me timezone info" You: "What would you like to know about timezones?"
+  ✗ User: "Search for X" You: "Would you like me to search for X, or something else?"
+- Examples of CORRECT behavior:
+  ✓ User: "What time is it in Paris?" You: [immediately use timezone skill for Paris, France]
+  ✓ User: "Show me timezone info" You: [immediately show timezone information]
+  ✓ User: "Search for X" You: [immediately execute search for X]
+- The ONLY acceptable follow-up questions are when:
+  • The request is genuinely ambiguous (e.g., "time in Georgia" - state or country?)
+  • Critical information is missing (e.g., user says "convert time" but doesn't specify from/to)
+  • Technical execution requires a parameter not provided
 
 {self._get_adaptive_context()}
 
@@ -67,17 +157,96 @@ You have the ability to search the web for real-time information when needed.
 
 **When to use skills:**
 - ONLY use skills for concrete actions like web searches, file operations, or calculations
-- USE web_search when you need current information or sources
+- USE timezone skill for ANY question about time in a specific location (city, state, country)
+- USE flight skill for flight times, distances between airports, or flight tracking
+- USE get_datetime skill for current local time/date only
+- USE web_search when you need current information, news, or verification of facts
+- DO NOT use web_search for time queries - ALWAYS use timezone skill instead
+- DO NOT use web_search for flight duration/distance - ALWAYS use flight skill instead
 - DO NOT use skills for conversational questions or philosophical discussions
 - For questions about yourself or conceptual topics, respond naturally in conversation
 
+**CRITICAL - Time Query Detection:**
+If the user asks about time in ANY location, use the timezone skill:
+- "What time is it in [location]?" → timezone skill with action="get_time"
+- "Current time in [city]?" → timezone skill with action="get_time"
+- "What's the time in [country]?" → timezone skill with action="get_time"
+- Examples: Moscow, California, London, Tokyo, Paris, etc.
+- NEVER use web_search for time queries
+
+**CRITICAL - Flight Query Detection:**
+If the user asks about flight time or distance, use the flight skill:
+- "Flight time from [city] to [city]" → flight skill with action="flight_time"
+- "How long to fly from [airport] to [airport]" → flight skill with action="flight_time"
+- "Distance from [airport] to [airport]" → flight skill with action="distance"
+- Works with IATA codes (BNA, LAX, JFK) or city names (Nashville, Los Angeles)
+- NEVER use web_search for flight duration/distance queries
+
 **How to use skills:**
-When you need to perform a concrete action, respond with JSON:
+When you need to perform a concrete action, respond with JSON ONLY (no other text):
 {{"action": "use_skill", "skill": "skill_name", "parameters": {{"param": "value"}}}}
 
 Available skills:
+- timezone: {{"action": "use_skill", "skill": "timezone", "parameters": {{"action": "get_time", "location": "city/state/country"}}}}
+- flight: {{"action": "use_skill", "skill": "flight", "parameters": {{"action": "flight_time", "from_airport": "BNA", "to_airport": "LAX"}}}}
+- get_datetime: {{"action": "use_skill", "skill": "get_datetime", "parameters": {{}}}}
 - web_search: {{"action": "use_skill", "skill": "web_search", "parameters": {{"query": "search terms", "num_results": 5}}}}
+- fetch_url: {{"action": "use_skill", "skill": "fetch_url", "parameters": {{"url": "https://example.com"}}}}
 - file_read, file_write, calculate
+
+**SKILL USAGE EXAMPLES:**
+
+User: "What time is it?"
+You: {{"action": "use_skill", "skill": "get_datetime", "parameters": {{}}}}
+
+User: "Show me all timezones"
+You: {{"action": "use_skill", "skill": "timezone", "parameters": {{"action": "list_all"}}}}
+
+User: "What time is it in California?"
+You: {{"action": "use_skill", "skill": "timezone", "parameters": {{"action": "get_time", "location": "California"}}}}
+
+User: "What's the current time in London?"
+You: {{"action": "use_skill", "skill": "timezone", "parameters": {{"action": "get_time", "location": "London"}}}}
+
+User: "What is the time in Moscow?"
+You: {{"action": "use_skill", "skill": "timezone", "parameters": {{"action": "get_time", "location": "Moscow"}}}}
+
+User: "Time in Tokyo?"
+You: {{"action": "use_skill", "skill": "timezone", "parameters": {{"action": "get_time", "location": "Tokyo"}}}}
+
+User: "Flight time from Nashville to Albuquerque"
+You: {{"action": "use_skill", "skill": "flight", "parameters": {{"action": "flight_time", "from_airport": "Nashville", "to_airport": "Albuquerque"}}}}
+
+User: "How long to fly from BNA to LAX?"
+You: {{"action": "use_skill", "skill": "flight", "parameters": {{"action": "flight_time", "from_airport": "BNA", "to_airport": "LAX"}}}}
+
+User: "What day is today?"
+You: {{"action": "use_skill", "skill": "get_datetime", "parameters": {{}}}}
+
+User: "Search for Storm bowling balls"
+You: {{"action": "use_skill", "skill": "web_search", "parameters": {{"query": "Storm bowling balls 2024", "num_results": 5}}}}
+
+**CRITICAL - Current time/date:**
+When user asks "what time", "what day", "what's the date", or anything about current time/date:
+- You MUST respond ONLY with the JSON: {{"action": "use_skill", "skill": "get_datetime", "parameters": {{}}}}
+- DO NOT write text like "the current time is..." - USE THE SKILL FIRST
+- DO NOT guess the day or time - ALWAYS use get_datetime skill
+- After the skill returns the current datetime, THEN tell the user in natural language
+- DO NOT say you can't access current time - you CAN via get_datetime skill
+
+**WORKFLOW - Automatic URL Fetching:**
+When web search results have incomplete information:
+1. Identify the most relevant URL from search results
+2. Use fetch_url to read the full page content
+3. Answer based on the complete fetched content
+4. DO NOT just report the URL - fetch it first, then answer
+
+**PRODUCT LIST FORMATTING:**
+When asked about product releases or new items:
+- Use clean bullet list format with item names and links
+- Format: "• Item Name - [Link](URL)"
+- Include only current/recent releases from the fetched content
+- Do not add extra descriptions or marketing text
 
 For everything else, respond naturally as this person would in conversation."""
         
@@ -123,16 +292,155 @@ For everything else, respond naturally as this person would in conversation."""
         
         return context + "\n"
     
+    def _detect_timezone_query(self, task: str) -> Optional[str]:
+        """Detect if the task is asking about current time in a location (not duration/travel time)."""
+        import re
+        task_lower = task.lower().strip()
+        
+        # Exclude queries about duration, travel time, flight time, estimated time, etc.
+        exclusion_patterns = [
+            r'flight\s+time',
+            r'travel\s+time',
+            r'estimated\s+time',
+            r'how\s+long',
+            r'duration',
+            r'takes?\s+to',
+            r'time\s+from\s+.*\s+to',
+            r'time\s+to\s+(get|travel|fly|drive|go)',
+        ]
+        
+        for exclusion in exclusion_patterns:
+            if re.search(exclusion, task_lower):
+                return None  # Not a timezone query
+        
+        # Specific current time query patterns (must ask about time IN a place)
+        patterns = [
+            r'(?:what|whats)\s+(?:is\s+)?(?:the\s+)?(?:current\s+)?time\s+(?:is\s+)?(?:it\s+)?in\s+(\w+(?:\s+\w+)?)',
+            r'(?:what|whats)\s+time\s+is\s+it\s+in\s+(\w+(?:\s+\w+)?)',
+            r'current\s+time\s+in\s+(\w+(?:\s+\w+)?)',
+            r'(?:what|whats)\s+the\s+time\s+in\s+(\w+(?:\s+\w+)?)',
+            r'tell\s+me\s+the\s+time\s+in\s+(\w+(?:\s+\w+)?)',
+            r'time\s+(?:right\s+)?now\s+in\s+(\w+(?:\s+\w+)?)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, task_lower)
+            if match:
+                location = match.group(1).strip()
+                # Handle common city/country names
+                if location in ['moscow', 'london', 'tokyo', 'paris', 'california', 'new york', 
+                               'berlin', 'sydney', 'beijing', 'mumbai', 'dubai', 'toronto']:
+                    return location
+                # Also return if it looks like a location (not just 'it' or 'here')
+                if len(location) > 2 and location not in ['the', 'it', 'is', 'was', 'are']:
+                    return location
+        
+        return None
+    
+    def _detect_flight_query(self, task: str) -> Optional[dict]:
+        """Detect if the task is asking about flight time/distance between locations."""
+        import re
+        task_lower = task.lower().strip()
+        
+        # Flight time/distance patterns
+        patterns = [
+            # "flight time from X to Y" or "flight time X to Y"
+            r'flight\s+time\s+(?:from\s+)?([A-Z]{3}|[\w\s]+?)\s+to\s+([A-Z]{3}|[\w\s]+?)(?:\s|$|\?)',
+            # "how long to fly from X to Y"
+            r'how\s+long\s+(?:to\s+)?fly\s+(?:from\s+)?([A-Z]{3}|[\w\s]+?)\s+to\s+([A-Z]{3}|[\w\s]+?)(?:\s|$|\?)',
+            # "estimated time flying from X to Y"  
+            r'estimated\s+time\s+(?:from\s+)?flying\s+(?:from\s+)?([A-Z]{3}|[\w\s]+?)\s+to\s+([A-Z]{3}|[\w\s]+?)(?:\s|$|\?)',
+            # "distance from X to Y" (airport context)
+            r'(?:flight\s+)?distance\s+(?:from\s+)?([A-Z]{3}|[\w\s]+?)\s+to\s+([A-Z]{3}|[\w\s]+?)(?:\s|$|\?)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, task_lower)
+            if match:
+                from_loc = match.group(1).strip()
+                to_loc = match.group(2).strip()
+                
+                # Clean up captured locations
+                from_loc = from_loc.rstrip('?.,;:')
+                to_loc = to_loc.rstrip('?.,;:')
+                
+                # Remove common trailing words
+                for word in ['airport', 'and', 'or', 'then']:
+                    if to_loc.endswith(' ' + word):
+                        to_loc = to_loc[:-len(word)-1].strip()
+                
+                return {
+                    'from': from_loc,
+                    'to': to_loc,
+                    'action': 'flight_time'
+                }
+        
+        return None
+    
     def process_task(self, task: str, context: Optional[str] = None) -> str:
         """Process a task and generate response in user's style."""
         print(f"\n🤖 Processing task: {task[:50]}...")
         
+        # Pre-process: Check if this is a flight query
+        flight_query = self._detect_flight_query(task)
+        if flight_query:
+            print(f"✈️ Detected flight query: {flight_query['from']} → {flight_query['to']}")
+            try:
+                flight_result = self.skill_manager.execute_skill(
+                    "flight",
+                    action=flight_query['action'],
+                    from_airport=flight_query['from'],
+                    to_airport=flight_query['to']
+                )
+                if flight_result.success:
+                    return flight_result.data
+                else:
+                    print(f"⚠️ Flight skill failed: {flight_result.error}")
+            except Exception as e:
+                print(f"⚠️ Flight query detection error: {e}")
+        
+        # Pre-process: Check if this is a timezone query
+        location = self._detect_timezone_query(task)
+        if location:
+            print(f"🌍 Detected timezone query for: {location}")
+            try:
+                time_result = self.skill_manager.execute_skill(
+                    "timezone",
+                    action="get_time",
+                    location=location
+                )
+                if time_result.success:
+                    return time_result.data
+                else:
+                    # If timezone skill fails, fall through to normal processing
+                    print(f"⚠️ Timezone skill failed: {time_result.error}")
+            except Exception as e:
+                print(f"⚠️ Timezone query detection error: {e}")
+        
+        # Get current datetime and inject it into system prompt
+        from datetime import datetime
+        now = datetime.now()
+        
+        system_prompt = self.build_system_prompt()
+        system_prompt += f"\n\n**CURRENT SYSTEM INFORMATION:**\n"
+        system_prompt += f"- Current Date: {now.strftime('%A, %B %d, %Y')}\n"
+        system_prompt += f"- Current Time: {now.strftime('%I:%M %p')}\n"
+        system_prompt += f"- Day of Week: {now.strftime('%A')}\n"
+        system_prompt += f"\nWhen users ask about the current time or date, use this information directly."
+        
+        # Add context reminder if there's conversation history
+        if self.conversation_history:
+            system_prompt += f"\n\n**CONVERSATION CONTEXT:**\n"
+            system_prompt += f"This is an ongoing conversation. You have exchanged {len(self.conversation_history)//2} messages with the user.\n"
+            system_prompt += f"The conversation history is included below. Reference it when the user asks follow-up questions.\n"
+            system_prompt += f"Maintain continuity and don't reset or reintroduce yourself.\n"
+        
         # Build messages
         messages = [
-            {"role": "system", "content": self.build_system_prompt()}
+            {"role": "system", "content": system_prompt}
         ]
         
-        # Add conversation history (last 5 interactions)
+        # Add conversation history (last 10 messages = 5 back-and-forth exchanges)
         messages.extend(self.conversation_history[-10:])
         
         # Add current task
@@ -184,6 +492,14 @@ For everything else, respond naturally as this person would in conversation."""
                         if skill_name == "web_search":
                             return self._execute_web_search(parameters.get("query", ""), parameters.get("num_results", 5))
                         
+                        # Handle URL fetching specially
+                        if skill_name == "fetch_url":
+                            return self._fetch_url_content(parameters.get("url", ""))
+                        
+                        # Handle datetime requests
+                        if skill_name == "get_datetime":
+                            return self._get_current_datetime()
+                        
                         # Execute other skills
                         result = self.skill_manager.execute_skill(skill_name, **parameters)
                         
@@ -218,6 +534,101 @@ For everything else, respond naturally as this person would in conversation."""
         formatted += "\n[INSTRUCTION: Answer the user's question using ONLY the information above. Do not add details not present in these snippets. If the snippets don't contain specific information, say so.]"
         
         return formatted
+    
+    def _fetch_url_content(self, url: str) -> str:
+        """Fetch and extract clean content from a URL."""
+        if not url:
+            return "Error: No URL provided."
+        
+        print(f"\n📄 Fetching content from: {url}")
+        
+        try:
+            # Try Jina AI Reader first (free, converts to clean markdown)
+            import requests
+            jina_url = f"https://r.jina.ai/{url}"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            
+            response = requests.get(jina_url, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                content = response.text
+                
+                # Limit content length to avoid token overload (keep first 5000 chars)
+                if len(content) > 5000:
+                    content = content[:5000] + "\n\n[Content truncated for length...]\n"
+                
+                print(f"✓ Fetched {len(content)} characters")
+                return f"Content from {url}:\n\n{content}"
+            else:
+                # Fallback to direct fetch with BeautifulSoup
+                return self._fetch_url_fallback(url)
+                
+        except Exception as e:
+            print(f"⚠️ Jina fetch failed, trying fallback: {e}")
+            return self._fetch_url_fallback(url)
+    
+    def _fetch_url_fallback(self, url: str) -> str:
+        """Fallback method using direct requests + BeautifulSoup."""
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Remove script and style elements
+            for script in soup(["script", "style", "nav", "footer", "header"]):
+                script.decompose()
+            
+            # Get text
+            text = soup.get_text(separator='\n', strip=True)
+            
+            # Clean up whitespace
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            content = '\n'.join(lines)
+            
+            # Limit length
+            if len(content) > 5000:
+                content = content[:5000] + "\n\n[Content truncated for length...]\n"
+            
+            print(f"✓ Fetched {len(content)} characters (fallback method)")
+            return f"Content from {url}:\n\n{content}"
+            
+        except ImportError:
+            return f"Error: BeautifulSoup not installed. Install with: pip install beautifulsoup4\nURL: {url}"
+        except Exception as e:
+            return f"Error fetching URL: {str(e)}\nURL: {url}"
+    
+    def _get_current_datetime(self) -> str:
+        """Get current date and time."""
+        from datetime import datetime
+        import pytz
+        
+        try:
+            # Get current time
+            now = datetime.now()
+            
+            # Format multiple useful representations
+            info = f"""Current Date and Time:
+
+• Full: {now.strftime('%A, %B %d, %Y at %I:%M:%S %p')}
+• Date: {now.strftime('%Y-%m-%d')}
+• Time: {now.strftime('%I:%M:%S %p')}
+• Day: {now.strftime('%A')}
+• Unix timestamp: {int(now.timestamp())}
+
+Use this information to answer the user's question about the current time or date."""
+            
+            return info
+            
+        except Exception as e:
+            return f"Error getting current datetime: {str(e)}"
     
     def make_decision(self, decision_prompt: str, options: List[str]) -> Dict:
         """Make a decision based on user's decision patterns."""
@@ -297,11 +708,13 @@ class AgentManager:
         llm = get_llm_provider(provider_name)
         
         # Initialize skill manager and load built-in skills
-        from .skills.builtin import CalculatorSkill, FileOpsSkill, WebSearchSkill
+        from .skills.builtin import CalculatorSkill, FileOpsSkill, WebSearchSkill, TimezoneSkill, FlightSkill
         skill_manager = SkillManager()
         skill_manager.registry.register(CalculatorSkill())
         skill_manager.registry.register(FileOpsSkill())
         skill_manager.registry.register(WebSearchSkill())
+        skill_manager.registry.register(TimezoneSkill())
+        skill_manager.registry.register(FlightSkill())
         
         # Load adaptive profile if requested
         adaptive_profile = None

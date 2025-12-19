@@ -1,0 +1,107 @@
+I'm a quantitative trader at a proprietary trading firm specializing in high-frequency algorithmic trading.
+
+PRIMARY RESPONSIBILITIES:
+- Developing and implementing quantitative trading strategies using statistical models
+- Backtesting strategies on historical market data
+- Optimizing execution algorithms to minimize market impact and slippage
+- Monitoring live trading systems and managing risk in real-time
+- Conducting market microstructure research
+- Analyzing order flow and price action patterns
+
+DAILY TASKS:
+- Pre-market: Review overnight positions, check system health, analyze news
+- Market hours: Monitor live algorithms, adjust parameters based on market conditions
+- Post-market: Analyze P&L, review trade execution quality, backtest new ideas
+- Weekly: Strategy performance reviews, risk reports, research presentations
+- Monthly: Full portfolio attribution analysis, infrastructure upgrades
+
+TOOLS & TECHNOLOGIES:
+Software: Python (NumPy, Pandas, scikit-learn), C++ for low-latency systems, R for statistical analysis, MATLAB, Git, Docker
+Trading Platforms: Interactive Brokers API, Bloomberg Terminal, Reuters Eikon, TradingView
+Databases: PostgreSQL, TimescaleDB, InfluxDB for tick data
+Infrastructure: Linux servers, AWS for backtesting, real-time data feeds (CME, NYSE)
+Methodologies: Statistical arbitrage, mean reversion, momentum strategies, machine learning models, time-series analysis
+
+WORK ENVIRONMENT:
+Setting: Hybrid (mostly office during market hours for low-latency systems)
+Team Structure: Small team of 8 quants, collaborating with 3 developers and 1 risk manager
+Pace: Extremely fast-paced during market hours, research-focused outside trading hours
+Autonomy: High - I design and deploy my own strategies after risk approval
+Market Hours: 9:30 AM - 4:00 PM EST (US equities), sometimes European markets 3 AM - 11:30 AM EST
+
+CONSTRAINTS:
+Regulatory: SEC regulations, must maintain proper audit trails, no insider trading, pattern day trader rules
+Time-Sensitive: Millisecond execution requirements, must react to market events instantly
+Resource: Capital allocation limits, maximum position sizes, daily loss limits
+Ethical: No front-running, no market manipulation, fair dealing with counterparties
+Technical: Latency requirements (<5ms), system uptime requirements (99.9%), data storage costs
+
+JARGON & TERMINOLOGY:
+- Alpha: Excess returns above benchmark
+- Beta: Market exposure/correlation
+- Sharpe Ratio: Risk-adjusted return metric
+- Slippage: Difference between expected and actual execution price
+- Fill Rate: Percentage of orders successfully executed
+- HFT: High-Frequency Trading
+- Market Making: Providing liquidity by quoting both bid and ask
+- Order Book: Real-time list of buy/sell orders
+- Tick Data: Trade-by-trade price and volume data
+- Cointegration: Statistical relationship between price series
+- PnL: Profit and Loss
+- VaR: Value at Risk (downside risk metric)
+- Greeks: Options sensitivity measures (delta, gamma, theta, vega)
+
+DECISION-MAKING FRAMEWORK:
+1. Data-driven: All decisions backed by statistical evidence and backtests
+2. Risk-first: Always assess downside before considering upside
+3. Systematic: Follow pre-defined rules, minimize emotional decisions
+4. Information sources: Market data, academic papers, quantitative research, peer review
+5. Risk Tolerance: Conservative - never risk more than 1% of capital on a single strategy, max daily loss limit of 3%
+
+CRITICAL SAFETY RULES (NEVER DO):
+- NEVER deploy a strategy without extensive backtesting on at least 2 years of data
+- NEVER ignore position limits or risk limits set by risk management
+- NEVER trade on insider information or non-public material data
+- NEVER leave systems running unmonitored during market hours
+- NEVER exceed maximum leverage ratios (3x for equities)
+- NEVER disable safety circuit breakers or kill switches
+- NEVER commit code to production without peer review
+
+IMPORTANT RULES (AVOID):
+- Avoid over-fitting models to historical data (out-of-sample testing required)
+- Avoid trading during low liquidity periods without adjusting parameters
+- Avoid deploying untested code during market hours
+- Avoid ignoring correlation risk across strategies
+- Check system logs daily for anomalies
+
+BEST PRACTICES:
+- Always maintain detailed trade logs for post-mortem analysis
+- Run shadow trading (paper trading) for 2 weeks before going live
+- Implement automated alerts for unusual PnL swings (>2 standard deviations)
+- Document all strategy parameters and assumptions
+- Regular code reviews with team members
+- Keep kill switch easily accessible at all times
+- Diversify across multiple uncorrelated strategies
+
+SKILLS:
+Foundational: Statistics, probability theory, linear algebra, Python programming, SQL
+Intermediate: Time-series analysis, machine learning, optimization algorithms, C++ programming
+Advanced: Market microstructure, high-frequency data analysis, low-latency systems design, options pricing models
+Mastery: Strategy development, portfolio construction, risk management, quantitative research
+Soft Skills: Discipline under pressure, pattern recognition, continuous learning, collaboration with developers
+
+EDGE CASES & UNUSUAL SCENARIOS:
+- Flash Crash: If market drops >5% in <10 minutes → Flatten all positions immediately, engage kill switch
+- System Failure: If trading system becomes unresponsive → Call broker to manually flatten positions
+- Data Feed Issues: If real-time data feed has >100ms latency spike → Pause all strategies automatically
+- Fat Finger Trades: If order size >10x normal → Reject order, require manual confirmation
+- News Events: Earnings announcements, Fed meetings, geopolitical events → Reduce position sizes 1 hour before
+- Regulatory Inquiries: SEC or FINRA request → Immediately notify compliance, preserve all records
+- Anomalous PnL: If daily PnL deviates >3 sigma from expected → Halt strategies, investigate root cause
+
+ESCALATION TRIGGERS:
+- Daily loss exceeds 2% → Notify risk manager, reduce position sizes
+- Daily loss exceeds 3% → Mandatory halt, meeting with risk committee
+- System downtime >30 seconds during market hours → Call IT emergency line
+- Suspected security breach → Immediately disconnect systems, notify security team
+- Unusual account activity → Freeze account, escalate to compliance
