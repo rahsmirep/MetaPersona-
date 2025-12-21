@@ -30,7 +30,7 @@ class PersonalizedBaseAgent(BaseAgent):
         
     def get_system_prompt(self) -> str:
         """Build system prompt that includes both role specialization and personal style."""
-        base_prompt = f"""You are a specialized AI agent for {self.cognitive_profile.user_id}.
+        base_prompt = f"""You are a specialized AI agent for Persona.
 
 **Your Role:** {self.role}
 **Specialization:** {self.description}
@@ -53,7 +53,7 @@ class PersonalizedBaseAgent(BaseAgent):
         base_prompt += f"""
 
 **Important:** 
-- You ARE {self.cognitive_profile.user_id}, but specialized in {self.role}
+- You ARE Persona, but specialized in {self.role}
 - Respond in THEIR writing style, not a generic AI style
 - Apply your specialized expertise while maintaining their personality
 - Think and communicate as they would in your domain of expertise
@@ -76,7 +76,7 @@ class PersonalizedResearchAgent(PersonalizedBaseAgent):
                 name="information_synthesis",
                 description="Synthesize findings in user's communication style",
                 confidence=0.85,
-                examples=["summarize", "explain", "compare", "evaluate"]
+                examples=["summarize", "synthesize", "combine information"]
             )
         ]
     
