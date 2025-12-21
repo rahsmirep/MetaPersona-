@@ -109,20 +109,22 @@ class KnowledgeExpansionLayer:
         if not queries:
             return None
         
-        # Search for each query
+        # Try web search first
         all_results = []
         for query in queries[:2]:  # Limit to 2 queries per area
             results = self._web_search(query)
             if results:
                 all_results.extend(results[:3])  # Top 3 results per query
         
-        if not all_results:
-            return None
+        # If web search succeeded, use those results
+        if all_results:
+            cleaned_data = self._clean_search_results(all_results, area)
+            return cleaned_data
         
-        # Clean and extract relevant information
-        cleaned_data = self._clean_search_results(all_results, area)
-        
-        return cleaned_data
+        # Fallback: Use LLM-based expansion when web search fails
+        print(f"   📚 Web search failed, using LLM fallback for {area}...")
+        llm_data = self._llm_based_expansion(schema, area)
+        return llm_data
     
     def _generate_search_queries(self, schema: ProfessionSchema, gap_area: str, context: str = None) -> List[str]:
         """Generate optimized search queries for a knowledge gap."""
@@ -567,3 +569,89 @@ Return ONLY valid JSON."""
             print(f"💾 Saved safety template: {profession} ({industry})")
         except Exception as e:
             print(f"Failed to save safety template: {e}")
+    
+    def _llm_based_expansion(self, schema: ProfessionSchema, area: str) -> Dict[str, Any]:
+        """
+        Use LLM to expand knowledge when web search is unavailable.
+        
+        Args:
+            schema: ProfessionSchema to expand
+            area: Knowledge area to expand
+            
+        Returns:
+            Structured data for the area
+        """
+        profession = schema.profession_name
+        industry = schema.industry
+        
+        # Create area-specific prompts
+        area_prompts = {
+            "primary_responsibilities": f"""List the 8-12 primary responsibilities of a {profession} in {industry}.
+Focus on day-to-day duties and core job functions. Be specific and actionable.""",
+            
+            "software_tools": f"""List 10-15 essential software tools and technologies used by a {profession} in {industry}.
+Include specific tool names, programming languages, frameworks, and platforms.""",
+            
+            "daily_tasks": f"""Describe 10-15 routine daily tasks performed by a {profession} in {industry}.
+Include morning routines, regular check-ins, meetings, and end-of-day activities.""",
+            
+            "decision_frameworks": f"""List 5-8 decision-making frameworks commonly used by a {profession} in {industry}.
+Include methodologies, mental models, and structured approaches to problem-solving.""",
+            
+            "safety_rules": f"""List critical safety protocols and compliance requirements for a {profession} in {industry}.
+Focus on what must NEVER be done and what must ALWAYS be followed.""",
+            
+            "best_practices": f"""List 10-15 industry best practices for a {profession} in {industry}.
+Include quality standards, professional standards, and recommended approaches.""",
+            
+            "edge_cases": f"""Describe 5-8 unusual scenarios or edge cases a {profession} in {industry} might encounter.
+Include rare situations, unexpected challenges, and non-standard scenarios.""",
+            
+            "industry_best_practices": f"""List industry-specific best practices and standards for {industry} as they relate to {profession}.
+Include regulatory standards, quality benchmarks, and professional guidelines."""
+        }
+        
+        prompt = area_prompts.get(area, f"Provide detailed information about {area} for a {profession} in {industry}.")
+        
+        full_prompt = f"""{prompt}
+
+Provide your response in JSON format:
+{{
+  "key_points": ["detailed point 1", "detailed point 2", ...],
+  "facts": ["factual statement 1", "factual statement 2", ...],
+  "best_practices": ["best practice 1", "best practice 2", ...],
+  "confidence": "high/medium/low"
+}}
+
+Be specific to {profession} in {industry}. Return ONLY valid JSON."""
+
+        messages = [
+            {"role": "system", "content": f"You are an expert on {profession} roles in the {industry} industry with deep knowledge of professional practices, tools, and standards."},
+            {"role": "user", "content": full_prompt}
+        ]
+        
+        try:
+            response = self.llm.generate(messages, temperature=0.3)
+            
+            # Parse JSON response
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group(0))
+                return {
+                    "key_points": data.get("key_points", [])[:15],
+                    "facts": data.get("facts", [])[:10],
+                    "best_practices": data.get("best_practices", [])[:15],
+                    "sources": ["LLM-generated"],
+                    "confidence": data.get("confidence", "medium")
+                }
+        except Exception as e:
+            print(f"   ⚠️ LLM expansion failed: {e}")
+        
+        # Ultimate fallback: return minimal structure
+        return {
+            "key_points": [f"Standard {area} for {profession}"],
+            "facts": [],
+            "best_practices": [],
+            "sources": ["fallback"],
+            "confidence": "low"
+        }

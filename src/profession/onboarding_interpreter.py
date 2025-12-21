@@ -109,8 +109,15 @@ Return ONLY valid JSON, no additional text.
             response = json_match.group(0)
         
         try:
-            data = json.loads(response)
-            return data
+            # Try to extract JSON if wrapped in markdown or text
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                data = json.loads(json_str)
+                return data
+            else:
+                data = json.loads(response)
+                return data
         except json.JSONDecodeError as e:
             print(f"Failed to parse LLM response: {e}")
             print(f"Response was: {response[:500]}")
