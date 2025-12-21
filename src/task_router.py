@@ -67,7 +67,8 @@ class TaskRouter:
         task: str,
         context: Optional[Dict[str, Any]] = None,
         preferred_role: Optional[str] = None,
-        agent_id: Optional[str] = None
+        agent_id: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, Any]]] = None
     ) -> Optional[BaseAgent]:
         """
         Route a task to the most suitable agent.
@@ -97,16 +98,21 @@ class TaskRouter:
                 print(f"Warning: No agents found with role '{preferred_role}'")
                 candidates = self.registry.list_all()
         
+        # Merge conversation history into context if provided
+        context_with_history = dict(context) if context else {}
+        if conversation_history:
+            context_with_history["conversation_history"] = conversation_history
+
         # Get confidence scores
         scored_agents = []
         for agent in candidates:
-            confidence = agent.can_handle_task(task, context)
+            confidence = agent.can_handle_task(task, context_with_history)
             if confidence >= self.min_confidence:
                 scored_agents.append((agent, confidence))
         
         # Use LLM-based routing if enabled and we have multiple candidates
         if self.use_llm_routing and len(scored_agents) > 1:
-            scored_agents = self._enhance_routing_with_llm(task, scored_agents, context)
+            scored_agents = self._enhance_routing_with_llm(task, scored_agents, context_with_history)
         
         if not scored_agents:
             # Try default agent
@@ -145,7 +151,8 @@ class TaskRouter:
         context: Optional[Dict[str, Any]] = None,
         preferred_role: Optional[str] = None,
         agent_id: Optional[str] = None,
-        use_skills: bool = True
+        use_skills: bool = True,
+        conversation_history: Optional[List[Dict[str, Any]]] = None
     ) -> TaskResult:
         """
         Route and execute a task.
@@ -160,7 +167,7 @@ class TaskRouter:
         Returns:
             TaskResult from the selected agent
         """
-        agent = self.route_task(task, context, preferred_role, agent_id)
+        agent = self.route_task(task, context, preferred_role, agent_id, conversation_history)
         
         if not agent:
             return TaskResult(
@@ -170,7 +177,11 @@ class TaskRouter:
             )
         
         try:
-            result = agent.handle_task(task, context, use_skills)
+            # Pass conversation_history in context for agent continuity
+            context_with_history = dict(context) if context else {}
+            if conversation_history:
+                context_with_history["conversation_history"] = conversation_history
+            result = agent.handle_task(task, context_with_history, use_skills)
             return result
         except Exception as e:
             return TaskResult(

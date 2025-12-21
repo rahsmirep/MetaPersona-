@@ -114,10 +114,16 @@ class QuestionRouter:
         
         return experts
     
-    def analyze_question(self, question: str) -> QuestionAnalysis:
-        """Analyze a question to determine routing."""
-        question_lower = question.lower()
-        
+    def analyze_question(self, question: str, conversation_history: Optional[List[Dict[str, Any]]] = None) -> QuestionAnalysis:
+        """Analyze a question to determine routing, using conversation history for context."""
+        # Combine recent conversation for context-aware analysis
+        context_text = ""
+        if conversation_history:
+            # Use last 4 turns (2 user, 2 assistant) for context
+            for msg in conversation_history[-4:]:
+                context_text += f"{msg['role']}: {msg['content']}\n"
+        question_lower = (context_text + question).lower()
+
         # Detect domains
         domain_scores = {}
         for domain, patterns in self.DOMAIN_PATTERNS.items():
@@ -127,33 +133,39 @@ class QuestionRouter:
                 score += len(matches)
             if score > 0:
                 domain_scores[domain] = score
-        
+
         # Sort by score
         sorted_domains = sorted(domain_scores.items(), key=lambda x: x[1], reverse=True)
-        
+
         primary_domain = sorted_domains[0][0] if sorted_domains else None
         secondary_domains = [d for d, _ in sorted_domains[1:3] if d != primary_domain]
-        
+
         # Determine complexity
         complexity = 'simple'
         if any(keyword in question_lower for keyword in self.COMPLEXITY_HIGH):
             complexity = 'complex'
         elif any(keyword in question_lower for keyword in self.COMPLEXITY_MODERATE):
             complexity = 'moderate'
-        
+
         # Check if collaboration needed
         requires_collaboration = (
             len(domain_scores) > 1 or
             any(keyword in question_lower for keyword in self.COLLABORATION_KEYWORDS) or
             complexity == 'complex'
         )
-        
+
         # Extract keywords
         keywords = self._extract_keywords(question)
-        
+
         # Calculate confidence
         confidence = min(1.0, (sorted_domains[0][1] / 3.0) if sorted_domains else 0.0)
-        
+
+        # Boost confidence if follow-up detected (pronouns, references to previous turns)
+        if conversation_history and any(
+            w in question_lower for w in ["that", "those", "it", "them", "previous", "earlier", "as above"]
+        ):
+            confidence = min(1.0, confidence + 0.2)
+
         return QuestionAnalysis(
             question=question,
             primary_domain=primary_domain,
@@ -164,22 +176,22 @@ class QuestionRouter:
             confidence=confidence
         )
     
-    def route_question(self, question: str) -> Tuple[List[Dict[str, Any]], QuestionAnalysis]:
-        """Route a question to appropriate expert persona(s)."""
-        analysis = self.analyze_question(question)
+    def route_question(self, question: str, conversation_history: Optional[List[Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], QuestionAnalysis]:
+        """Route a question to appropriate expert persona(s), using conversation history for context."""
+        analysis = self.analyze_question(question, conversation_history=conversation_history)
         question_lower = question.lower()
-        
+
         selected_personas = []
-        
+
         # First, check profession experts (highest priority for professional questions)
         profession_match = None
         best_match_score = 0
-        
+
         for expert in self.profession_experts:
             # Check if question matches profession keywords
             keywords = expert.get('keywords', [])
             match_score = 0
-            
+
             for kw in keywords:
                 kw_lower = kw.lower()
                 # Exact match
@@ -188,18 +200,24 @@ class QuestionRouter:
                 # Partial word match (e.g., "trading" matches "quantitative trader")
                 elif any(word in question_lower for word in kw_lower.split() if len(word) > 3):
                     match_score += 1
-            
+
+            # Boost match score if follow-up detected in context
+            if conversation_history and any(
+                w in question_lower for w in ["that", "those", "it", "them", "previous", "earlier", "as above"]
+            ):
+                match_score += 1
+
             if match_score > best_match_score:
                 best_match_score = match_score
                 profession_match = expert
-        
+
         # If profession expert matched with reasonable confidence
         if profession_match and best_match_score >= 1:
             selected_personas.append(profession_match)
             # Update analysis with profession domain
             analysis.primary_domain = profession_match.get('profession_name', 'profession')
             analysis.confidence = min(1.0, best_match_score / 3.0)
-            
+
             # Only add domain experts if collaboration is clearly needed
             if analysis.requires_collaboration and len(analysis.secondary_domains) > 0:
                 for domain in analysis.secondary_domains[:1]:  # Max 1 additional expert
@@ -210,17 +228,17 @@ class QuestionRouter:
             # Add primary expert
             if analysis.primary_domain and analysis.primary_domain in self.available_personas:
                 selected_personas.append(self.available_personas[analysis.primary_domain])
-            
+
             # Add secondary experts if collaboration needed
             if analysis.requires_collaboration:
                 for domain in analysis.secondary_domains:
                     if domain in self.available_personas:
                         selected_personas.append(self.available_personas[domain])
-            
+
             # If no specific domain detected, return all personas for general question
             if not selected_personas:
                 selected_personas = list(self.available_personas.values())
-        
+
         return selected_personas, analysis
     
     def _extract_keywords(self, question: str) -> List[str]:

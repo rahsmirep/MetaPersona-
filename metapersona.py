@@ -1233,15 +1233,16 @@ def persona_chat(provider: str, data_dir: str):
         agent_manager = AgentManager(data_dir)
         persona_agent = agent_manager.initialize_agent(provider_name=provider)
         cognitive_profile = persona_agent.profile
-        
+
         # Initialize components
         llm_provider = get_llm_provider(provider)
         skills_manager = SkillManager()
         registry = AgentRegistry(data_dir)
-        
+        memory = MemoryLoop(data_dir)
+
         # Register YOUR personalized agents
         console.print("[cyan]Initializing your personalized agents...[/cyan]")
-        
+
         if "researcher" not in registry:
             researcher = PersonalizedResearchAgent(
                 agent_id="researcher",
@@ -1253,7 +1254,7 @@ def persona_chat(provider: str, data_dir: str):
             )
             registry.register(researcher)
             console.print("  ✓ Research Agent (your research style)")
-        
+
         if "coder" not in registry:
             coder = PersonalizedCodeAgent(
                 agent_id="coder",
@@ -1265,7 +1266,7 @@ def persona_chat(provider: str, data_dir: str):
             )
             registry.register(coder)
             console.print("  ✓ Code Agent (your coding style)")
-        
+
         if "writer" not in registry:
             writer = PersonalizedWriterAgent(
                 agent_id="writer",
@@ -1277,7 +1278,7 @@ def persona_chat(provider: str, data_dir: str):
             )
             registry.register(writer)
             console.print("  ✓ Writer Agent (your writing style)")
-        
+
         if "generalist" not in registry:
             generalist = PersonalizedGeneralistAgent(
                 agent_id="generalist",
@@ -1289,7 +1290,7 @@ def persona_chat(provider: str, data_dir: str):
             )
             registry.register(generalist)
             console.print("  ✓ Generalist Agent (your conversational style)")
-        
+
         # Create router with LLM enhancement
         router = TaskRouter(
             registry,
@@ -1297,67 +1298,77 @@ def persona_chat(provider: str, data_dir: str):
             llm_provider=llm_provider,
             use_llm_routing=True
         )
-        
-        console.print(f"\n[bold green]All agents ready![/bold green]")
-        console.print(f"[dim]Cognitive Profile: {cognitive_profile.user_id}[/dim]")
-        console.print(f"[dim]Writing Tone: {cognitive_profile.writing_style.tone}[/dim]\n")
-        console.print("[dim]Type 'exit' to quit, 'agents' to list, 'stats' for analytics[/dim]\n")
-        
+
+        console.print(f"\n[bold green]All agents ready![\/bold green]")
+        console.print(f"[dim]Cognitive Profile: {cognitive_profile.user_id}[\/dim]")
+        console.print(f"[dim]Writing Tone: {cognitive_profile.writing_style.tone}[\/dim]\n")
+        console.print("[dim]Type 'exit' to quit, 'agents' to list, 'stats' for analytics[\/dim]\n")
+
         # Interactive loop
         session = PromptSession(history=InMemoryHistory())
-        
+
         while True:
             try:
                 user_input = session.prompt("\n[You] > ")
-                
+
                 if not user_input.strip():
                     continue
-                
+
                 if user_input.lower() == 'exit':
-                    console.print("[yellow]Goodbye![/yellow]")
+                    console.print("[yellow]Goodbye![\/yellow]")
                     break
-                
+
                 if user_input.lower() == 'agents':
                     agents = registry.list_all()
-                    console.print(f"\n[bold]Your Personalized Agents:[/bold]")
+                    console.print(f"\n[bold]Your Personalized Agents:[\/bold]")
                     for agent in agents:
                         console.print(f"  • {agent.agent_id} - {agent.description}")
                     continue
-                
+
                 if user_input.lower() == 'stats':
                     stats = router.get_routing_stats()
-                    console.print(f"\n[bold]Routing Statistics:[/bold]")
+                    console.print(f"\n[bold]Routing Statistics:[\/bold]")
                     console.print(f"  Total routes: {stats['total_routes']}")
                     console.print(f"  Average confidence: {stats['average_confidence']:.2f}")
                     console.print(f"  Most used: {stats['most_used_agent']}")
-                    console.print(f"\n[bold]Agent usage:[/bold]")
+                    console.print(f"\n[bold]Agent usage:[\/bold]")
                     for agent_id, count in stats['agent_usage'].items():
                         console.print(f"  • {agent_id}: {count}")
                     continue
-                
-                # Route and execute
-                agent = router.route_task(user_input)
+
+                # Fetch recent conversation history from memory
+                recent_interactions = memory.get_recent_interactions(10)
+                conversation_history = [
+                    {"role": "user", "content": i.task} if idx % 2 == 0 else {"role": "assistant", "content": i.response}
+                    for idx, i in enumerate(recent_interactions)
+                ]
+
+                # Route and execute with memory-aware context
+                agent = router.route_task(user_input, conversation_history=conversation_history)
                 if not agent:
-                    console.print("[red]No suitable agent found.[/red]")
+                    console.print("[red]No suitable agent found.[\/red]")
                     continue
-                
-                console.print(f"[dim]→ Routing to {agent.agent_id}[/dim]")
-                
-                result = agent.handle_task(user_input)
-                
+
+                console.print(f"[dim]→ Routing to {agent.agent_id}[\/dim]")
+
+                result = agent.handle_task(user_input, {"conversation_history": conversation_history})
+
                 if result.success:
-                    console.print(f"\n[bold green]{agent.role.title()}:[/bold green]")
+                    console.print(f"\n[bold green]{agent.role.title()}:[\/bold green]")
                     console.print(Panel(result.result, border_style="green"))
                 else:
-                    console.print(f"[red]Error: {result.error}[/red]")
-                
+                    console.print(f"[red]Error: {result.error}[\/red]")
+
+                # Record this interaction in memory
+                memory.record_interaction(user_input, str(result.result))
+
             except KeyboardInterrupt:
-                console.print("\n[yellow]Use 'exit' to quit.[/yellow]")
+                console.print("\n[yellow]Use 'exit' to quit.[\/yellow]")
             except EOFError:
                 break
-        
+
     except Exception as e:
-        console.print(f"[red]Error: {str(e)}[/red]")
+        console.print(f"[red]Error: {str(e)}[\/red]")
         import traceback
         traceback.print_exc()
 
