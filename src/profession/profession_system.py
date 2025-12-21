@@ -8,6 +8,7 @@ from .schema import ProfessionSchema
 from .onboarding_interpreter import OnboardingInterpreter
 from .knowledge_expansion import KnowledgeExpansionLayer
 from .reasoning import ProfessionReasoningLayer, ParallelSelfAlignment
+from .interactive_onboarding import InteractiveOnboarding
 from ..cognitive_profile import CognitiveProfile, ProfileManager
 from ..llm_provider import LLMProvider
 
@@ -37,6 +38,7 @@ class UniversalProfessionSystem:
         )
         self.reasoning = ProfessionReasoningLayer(llm_provider)
         self.alignment = ParallelSelfAlignment()
+        self.interactive = InteractiveOnboarding(llm_provider)
         
         # Cache
         self.loaded_schemas: Dict[str, ProfessionSchema] = {}
@@ -63,10 +65,9 @@ class UniversalProfessionSystem:
         # Step 1: Interpret input
         schema = self.onboarding.interpret(user_input, user_id)
         
-        # Step 2: Optionally refine with questions
+        # Step 2: Interactive refinement if requested
         if interactive:
-            # In full implementation, ask clarifying questions
-            pass
+            schema = self.interactive.refine_schema(schema)
         
         # Step 3: Expand high-priority gaps
         print("🌐 Expanding knowledge from web sources...")
