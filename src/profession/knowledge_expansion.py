@@ -1,6 +1,6 @@
 """
 Knowledge Expansion Layer
-Fills gaps in profession schema using web search
+Fills gaps in profession schema using web search and LLM-based reasoning
 """
 from typing import List, Dict, Any, Optional
 import requests
@@ -8,7 +8,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from .schema import ProfessionSchema
+from .schema import ProfessionSchema, SafetyRules
 
 
 class KnowledgeExpansionLayer:
@@ -20,6 +20,10 @@ class KnowledgeExpansionLayer:
         self.google_cse_id = google_cse_id
         self.cache_dir = cache_dir or Path("data/knowledge_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Template directory for pre-generated safety rules
+        self.template_dir = Path("data/safety_templates")
+        self.template_dir.mkdir(parents=True, exist_ok=True)
     
     def expand_schema(self, schema: ProfessionSchema, priority_areas: List[str] = None) -> ProfessionSchema:
         """
@@ -362,3 +366,204 @@ Return ONLY valid JSON."""
                 }, f, indent=2)
         except Exception as e:
             print(f"Failed to cache results: {e}")
+    
+    def generate_comprehensive_safety_rules(self, schema: ProfessionSchema) -> SafetyRules:
+        """
+        Generate comprehensive safety rules using LLM-based reasoning.
+        Uses 6-question framework for legal and ethical compliance.
+        
+        Args:
+            schema: ProfessionSchema to generate safety rules for
+            
+        Returns:
+            SafetyRules object with critical rules, warnings, and best practices
+        """
+        profession = schema.profession_name
+        industry = schema.industry
+        
+        safety_prompt = f"""You are a legal and compliance expert. Generate comprehensive safety rules for a {profession} working in {industry}.
+
+Use this 6-question framework to ensure complete coverage:
+
+**1. REGULATORY & COMPLIANCE**
+- What government agencies regulate this profession? (FDA, SEC, FTC, HIPAA, etc.)
+- What licenses or certifications are legally required?
+- What actions require regulatory approval before execution?
+- What reporting/documentation is legally mandated?
+
+**2. DATA & PRIVACY**
+- What types of data are legally protected? (PII, PHI, financial, classified)
+- What are the data retention/destruction requirements?
+- Who can legally access certain data?
+- What consent is required before collecting/using data?
+
+**3. PROFESSIONAL ETHICS & STANDARDS**
+- What professional codes of conduct exist?
+- What constitutes malpractice or professional negligence?
+- What conflicts of interest must be disclosed/avoided?
+- What fiduciary duties exist?
+
+**4. SAFETY & RISK MANAGEMENT**
+- What actions could cause physical harm?
+- What validation/testing is required before deployment?
+- What safety protocols are legally mandated?
+- What insurance or bonding is required?
+
+**5. LEGAL BOUNDARIES**
+- What practices constitute fraud or misrepresentation?
+- What confidentiality obligations exist?
+- What anti-discrimination laws apply?
+- What insider trading/market manipulation rules apply?
+
+**6. SCOPE OF PRACTICE**
+- What tasks require specific credentials to perform legally?
+- What advice constitutes unauthorized practice?
+- What delegations are prohibited?
+
+Generate rules in JSON format:
+{{
+  "critical_rules": [
+    "NEVER [action that could cause legal/ethical violations]",
+    "ALWAYS [required compliance action]",
+    ... (minimum 10 rules)
+  ],
+  "important_rules": [
+    "Should avoid [risky situation]",
+    "Should always [recommended practice]",
+    ... (5-8 rules)
+  ],
+  "best_practices": [
+    "Best practice statement",
+    ... (8-12 practices)
+  ],
+  "regulatory_context": {{
+    "primary_regulations": ["list of key regulations/laws"],
+    "governing_bodies": ["agencies/organizations"],
+    "required_certifications": ["licenses/certifications"]
+  }}
+}}
+
+Be specific to {profession} in {industry}. Focus on rules that prevent legal violations, protect people from harm, and ensure ethical practice.
+
+Return ONLY valid JSON."""
+
+        messages = [
+            {"role": "system", "content": "You are an expert in professional compliance, legal requirements, and ethical standards across industries."},
+            {"role": "user", "content": safety_prompt}
+        ]
+        
+        try:
+            response = self.llm.generate(messages, temperature=0.3)
+            
+            # Parse JSON response
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                safety_data = json.loads(json_match.group(0))
+                
+                # Create SafetyRules object
+                safety_rules = SafetyRules(
+                    critical=safety_data.get("critical_rules", [])[:15],  # Cap at 15
+                    important=safety_data.get("important_rules", [])[:10],
+                    best_practices=safety_data.get("best_practices", [])[:15]
+                )
+                
+                # Store regulatory context in schema metadata if available
+                if "regulatory_context" in safety_data:
+                    schema.constraints.regulatory = safety_data["regulatory_context"].get("primary_regulations", [])
+                
+                return safety_rules
+                
+        except Exception as e:
+            print(f"Failed to generate safety rules via LLM: {e}")
+        
+        # Fallback: basic safety rules
+        return self._generate_fallback_safety_rules(profession, industry)
+    
+    def _generate_fallback_safety_rules(self, profession: str, industry: str) -> SafetyRules:
+        """Generate basic fallback safety rules when LLM generation fails."""
+        return SafetyRules(
+            critical=[
+                f"NEVER provide advice outside your scope of practice as a {profession}",
+                f"ALWAYS comply with {industry} industry regulations and standards",
+                "NEVER misrepresent credentials or qualifications",
+                "ALWAYS protect confidential and sensitive information",
+                "NEVER engage in discriminatory practices"
+            ],
+            important=[
+                "Should verify compliance with current regulations before taking action",
+                "Should consider ethical implications of decisions",
+                "Should seek second opinions on high-risk decisions"
+            ],
+            best_practices=[
+                "Document important decisions and their rationale",
+                "Stay current with industry standards and regulations",
+                f"Follow {industry} best practices and guidelines",
+                "Handle sensitive data with appropriate security measures"
+            ]
+        )
+    
+    def load_safety_template(self, profession: str, industry: str) -> Optional[SafetyRules]:
+        """
+        Load pre-generated safety rules template if available.
+        
+        Args:
+            profession: Profession name
+            industry: Industry name
+            
+        Returns:
+            SafetyRules if template exists, None otherwise
+        """
+        # Normalize names for filename
+        profession_key = profession.lower().replace(" ", "_").replace("/", "_")
+        industry_key = industry.lower().replace(" ", "_").replace("/", "_")
+        
+        template_path = self.template_dir / f"{profession_key}_{industry_key}.json"
+        
+        if template_path.exists():
+            try:
+                with open(template_path, 'r', encoding='utf-8') as f:
+                    template_data = json.load(f)
+                
+                return SafetyRules(
+                    critical=template_data.get("critical", []),
+                    important=template_data.get("important", []),
+                    best_practices=template_data.get("best_practices", []),
+                    emergency_protocols=template_data.get("emergency_protocols", [])
+                )
+            except Exception as e:
+                print(f"Failed to load safety template: {e}")
+        
+        return None
+    
+    def save_safety_template(self, profession: str, industry: str, safety_rules: SafetyRules):
+        """
+        Save safety rules as a reusable template.
+        
+        Args:
+            profession: Profession name
+            industry: Industry name
+            safety_rules: SafetyRules to save
+        """
+        # Normalize names for filename
+        profession_key = profession.lower().replace(" ", "_").replace("/", "_")
+        industry_key = industry.lower().replace(" ", "_").replace("/", "_")
+        
+        template_path = self.template_dir / f"{profession_key}_{industry_key}.json"
+        
+        try:
+            template_data = {
+                "profession": profession,
+                "industry": industry,
+                "generated_at": datetime.now().isoformat(),
+                "critical": safety_rules.critical,
+                "important": safety_rules.important,
+                "best_practices": safety_rules.best_practices,
+                "emergency_protocols": safety_rules.emergency_protocols
+            }
+            
+            with open(template_path, 'w', encoding='utf-8') as f:
+                json.dump(template_data, f, indent=2, ensure_ascii=False)
+            
+            print(f"💾 Saved safety template: {profession} ({industry})")
+        except Exception as e:
+            print(f"Failed to save safety template: {e}")

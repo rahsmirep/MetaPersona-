@@ -74,7 +74,32 @@ class UniversalProfessionSystem:
         if priority_gaps:
             schema = self.knowledge_expansion.expand_schema(schema, priority_gaps)
         
-        # Step 4: Save schema
+        # Step 4: Generate comprehensive safety rules (CRITICAL)
+        print("🔒 Generating safety and compliance rules...")
+        if len(schema.safety_rules.critical) < 5:  # If insufficient safety rules
+            # Try loading from template first
+            template_safety = self.knowledge_expansion.load_safety_template(
+                schema.profession_name,
+                schema.industry
+            )
+            
+            if template_safety:
+                print(f"   ✓ Loaded from template library")
+                schema.safety_rules = template_safety
+            else:
+                # Generate using LLM
+                print(f"   🤖 Generating with LLM (6-question framework)...")
+                enhanced_safety = self.knowledge_expansion.generate_comprehensive_safety_rules(schema)
+                schema.safety_rules = enhanced_safety
+                
+                # Save as template for future use
+                self.knowledge_expansion.save_safety_template(
+                    schema.profession_name,
+                    schema.industry,
+                    enhanced_safety
+                )
+        
+        # Step 5: Save schema
         self.save_profession_schema(schema)
         
         print(f"✅ Profession schema created: {schema.profession_name}")

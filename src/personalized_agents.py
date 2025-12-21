@@ -98,6 +98,15 @@ class PersonalizedResearchAgent(PersonalizedBaseAgent):
             return 0.75
         
         return 0.3
+    
+    def handle_task(self, task: str, context: Optional[Dict[str, Any]] = None, use_skills: bool = True) -> TaskResult:
+        """Execute research task."""
+        messages = [
+            {"role": "system", "content": self.get_system_prompt()},
+            {"role": "user", "content": task}
+        ]
+        response = self.llm_provider.generate(messages, temperature=0.7)
+        return TaskResult(success=True, result=response, metadata={"agent_id": self.agent_id})
 
 
 class PersonalizedCodeAgent(PersonalizedBaseAgent):
@@ -142,6 +151,15 @@ class PersonalizedCodeAgent(PersonalizedBaseAgent):
             return 0.7
         
         return 0.3
+    
+    def handle_task(self, task: str, context: Optional[Dict[str, Any]] = None, use_skills: bool = True) -> TaskResult:
+        """Execute coding task."""
+        messages = [
+            {"role": "system", "content": self.get_system_prompt()},
+            {"role": "user", "content": task}
+        ]
+        response = self.llm_provider.generate(messages, temperature=0.7)
+        return TaskResult(success=True, result=response, metadata={"agent_id": self.agent_id})
 
 
 class PersonalizedWriterAgent(PersonalizedBaseAgent):
@@ -185,6 +203,15 @@ class PersonalizedWriterAgent(PersonalizedBaseAgent):
             return 0.7
         
         return 0.3
+    
+    def handle_task(self, task: str, context: Optional[Dict[str, Any]] = None, use_skills: bool = True) -> TaskResult:
+        """Execute writing task."""
+        messages = [
+            {"role": "system", "content": self.get_system_prompt()},
+            {"role": "user", "content": task}
+        ]
+        response = self.llm_provider.generate(messages, temperature=0.7)
+        return TaskResult(success=True, result=response, metadata={"agent_id": self.agent_id})
 
 
 class PersonalizedGeneralistAgent(PersonalizedBaseAgent):
@@ -222,6 +249,15 @@ class PersonalizedGeneralistAgent(PersonalizedBaseAgent):
         
         # Good for explanations and conversations
         return 0.5
+    
+    def handle_task(self, task: str, context: Optional[Dict[str, Any]] = None, use_skills: bool = True) -> TaskResult:
+        """Execute general task."""
+        messages = [
+            {"role": "system", "content": self.get_system_prompt()},
+            {"role": "user", "content": task}
+        ]
+        response = self.llm_provider.generate(messages, temperature=0.7)
+        return TaskResult(success=True, result=response, metadata={"agent_id": self.agent_id})
 
 
 class PersonalizedProfessionAgent(PersonalizedBaseAgent):
@@ -336,9 +372,7 @@ class PersonalizedProfessionAgent(PersonalizedBaseAgent):
         """Build system prompt with profession context and aligned persona."""
         # Use aligned persona system prompt
         aligned_prompt = self.alignment.generate_system_prompt(
-            self.aligned_persona,
-            self.profession_schema,
-            self.cognitive_profile
+            self.aligned_persona
         )
         
         # Add role context
@@ -385,7 +419,7 @@ class PersonalizedProfessionAgent(PersonalizedBaseAgent):
             {"role": "user", "content": enhanced_prompt}
         ]
         
-        response = self.llm.generate(messages, temperature=0.7)
+        response = self.llm_provider.generate(messages, temperature=0.7)
         
         # Validate response against safety rules
         is_safe, violations = self.reasoning.validate_response(
