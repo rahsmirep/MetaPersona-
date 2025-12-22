@@ -1,162 +1,85 @@
 import pytest
-from types import SimpleNamespace
-from .personalized_agents import (
-    PersonalizedBaseAgent,
-    PersonalizedResearchAgent,
-    PersonalizedCodeAgent,
-    PersonalizedWriterAgent,
-    PersonalizedGeneralistAgent,
-    PersonalizedProfessionAgent,
-)
+from src.personalized_agents import PersonalizedAgent
+from src.profession.schema import ProfessionSchema
+from src.cognitive_profile import CognitiveProfile, WritingStyle, DecisionPattern
 
-# --- Mocks ---
+class DummyLLM:
+    def generate(self, messages, temperature=0.3):
+        return '{"decision_type": "technical", "urgency": "immediate", "risk_level": "low"}'
 
-class DummyLLMProvider:
-    def generate(self, messages, temperature=0.7):
-        return "dummy response"
+class MockDecisionPatterns:
+    decision_frameworks = ["framework1"]
+    risk_tolerance = type("Mock", (), {"value": "moderate"})()
+    information_sources = ["source1"]
 
-class DummySkillManager:
-    pass
+class MockToolsEquipment:
+    software = ["ToolA"]
+    platforms = ["PlatformA"]
+    methodologies = ["MethodA"]
+
+class MockSkillHierarchy:
+    advanced = ["SkillA"]
+
+class MockConstraints:
+    regulatory = ["RegulationA"]
+    ethical_considerations = ["EthicsA"]
+    time_sensitive = ["TimeA"]
+
+class MockEnvironment:
+    autonomy_level = type("Mock", (), {"value": "high"})()
+    team_structure = type("Mock", (), {"value": "collaborative"})()
+    pace = type("Mock", (), {"value": "fast"})()
+    work_setting = type("Mock", (), {"value": "remote"})()
+
+class MockRoleDefinition:
+    primary_responsibilities = ["ResponsibilityA"]
+
+class MockSafetyRules:
+    critical = ["Never do X"]
+    important = ["Avoid Y"]
+
+class MockTerminology:
+    jargon = {"termA": "definitionA"}
 
 @pytest.fixture
-def mock_cognitive_profile():
-    writing_style = SimpleNamespace(
-        tone="Friendly",
-        vocabulary_level="Advanced",
-        sentence_structure="Complex",
-        punctuation_style="Formal"
+def agent():
+    profession_schema = ProfessionSchema(
+        profession_id="test_id",
+        profession_name="Engineer",
+        industry="Tech",
+        decision_patterns=MockDecisionPatterns(),
+        tools_equipment=MockToolsEquipment(),
+        skill_hierarchy=MockSkillHierarchy(),
+        constraints=MockConstraints(),
+        environment=MockEnvironment(),
+        role_definition=MockRoleDefinition(),
+        safety_rules=MockSafetyRules(),
+        terminology=MockTerminology()
     )
-    decision_pattern = SimpleNamespace(
-        approach="Analytical",
-        risk_tolerance="Low"
+    writing_style = WritingStyle(
+        tone="formal",
+        vocabulary_level="advanced",
+        sentence_structure="complex"
     )
-    return SimpleNamespace(
+    decision_pattern = DecisionPattern(
+        approach="analytical",
+        risk_tolerance="moderate"
+    )
+    cognitive_profile = CognitiveProfile(
+        user_id="user123",
         writing_style=writing_style,
         decision_pattern=decision_pattern
     )
-
-@pytest.fixture
-def mock_llm_provider():
-    return DummyLLMProvider()
-
-@pytest.fixture
-def mock_profession_schema():
-    class DummyEnv:
-        work_setting = SimpleNamespace(value="Remote")
-        team_structure = SimpleNamespace(value="Flat")
-    class DummyTools:
-        software = ["Excel", "Word", "PowerPoint"]
-    class DummyTerminology:
-        jargon = {"synergy": "working together"}
-        acronyms = {"KPI": "Key Performance Indicator"}
-    class DummyRoleDef:
-        primary_responsibilities = ["analyze data", "prepare reports"]
-    def identify_knowledge_gaps(task): return []
-    return SimpleNamespace(
-        profession_name="Data Analyst",
-        industry="Analytics",
-        tools_equipment=DummyTools(),
-        terminology=DummyTerminology(),
-        role_definition=DummyRoleDef(),
-        environment=DummyEnv(),
-        identify_knowledge_gaps=identify_knowledge_gaps
+    return PersonalizedAgent(
+        user_id="agent1",
+        profession_schema=profession_schema,
+        cognitive_profile=cognitive_profile,
+        llm_provider=DummyLLM()
     )
 
-@pytest.fixture
-def patch_profession_alignment(monkeypatch):
-    class DummyReasoning:
-        def __init__(self, llm): pass
-        def enhance_prompt(self, task, schema, profile, history): return task
-        def extract_decision_factors(self, task, schema): return {"factor": "value"}
-        def validate_response(self, response, schema): return (True, [])
-    class DummyAlignment:
-        def create_aligned_persona(self, schema, profile): return "aligned"
-        def generate_system_prompt(self, aligned): return "ALIGNED_PROMPT"
-    monkeypatch.setattr(
-        "src.profession.ProfessionReasoningLayer", DummyReasoning
-    )
-    monkeypatch.setattr(
-        "src.profession.ParallelSelfAlignment", DummyAlignment
-    )
-
-
-# Remove or comment out this test:
-# def test_base_agent_system_prompt(mock_cognitive_profile, mock_llm_provider):
-#     agent = PersonalizedBaseAgent(
-#         agent_id="a1",
-#         role="TestRole",
-#         description="TestDesc",
-#         cognitive_profile=mock_cognitive_profile,
-#         llm_provider=mock_llm_provider
-#     )
-#     prompt = agent.get_system_prompt()
-#     assert "TestRole" in prompt
-#     assert "TestDesc" in prompt
-#     assert "Friendly" in prompt
-#     assert "Analytical" in prompt
-
-def test_research_agent_system_prompt(mock_cognitive_profile, mock_llm_provider):
-    agent = PersonalizedResearchAgent(
-        agent_id="a2",
-        role="Researcher",
-        description="Research stuff",
-        cognitive_profile=mock_cognitive_profile,
-        llm_provider=mock_llm_provider
-    )
-    prompt = agent.get_system_prompt()
-    assert "Researcher" in prompt
-    assert "Research stuff" in prompt
-    assert "Tone: Friendly" in prompt
-
-def test_code_agent_system_prompt(mock_cognitive_profile, mock_llm_provider):
-    agent = PersonalizedCodeAgent(
-        agent_id="a3",
-        role="Coder",
-        description="Writes code",
-        cognitive_profile=mock_cognitive_profile,
-        llm_provider=mock_llm_provider
-    )
-    prompt = agent.get_system_prompt()
-    assert "Coder" in prompt
-    assert "Writes code" in prompt
-
-def test_writer_agent_system_prompt(mock_cognitive_profile, mock_llm_provider):
-    agent = PersonalizedWriterAgent(
-        agent_id="a4",
-        role="Writer",
-        description="Writes content",
-        cognitive_profile=mock_cognitive_profile,
-        llm_provider=mock_llm_provider
-    )
-    prompt = agent.get_system_prompt()
-    assert "Writer" in prompt
-    assert "Writes content" in prompt
-
-def test_generalist_agent_system_prompt(mock_cognitive_profile, mock_llm_provider):
-    agent = PersonalizedGeneralistAgent(
-        agent_id="a5",
-        role="Generalist",
-        description="General tasks",
-        cognitive_profile=mock_cognitive_profile,
-        llm_provider=mock_llm_provider
-    )
-    prompt = agent.get_system_prompt()
-    assert "Generalist" in prompt
-    assert "General tasks" in prompt
-
-def test_profession_agent_system_prompt(
-    mock_cognitive_profile, mock_llm_provider, mock_profession_schema, patch_profession_alignment
-):
-    agent = PersonalizedProfessionAgent(
-        agent_id="a6",
-        role="ProRole",
-        description="ProDesc",
-        cognitive_profile=mock_cognitive_profile,
-        llm_provider=mock_llm_provider,
-        profession_schema=mock_profession_schema
-    )
-    prompt = agent.get_system_prompt()
-    assert "ALIGNED_PROMPT" in prompt
-    assert "ProRole" in prompt
-    assert "Data Analyst" in prompt
-    assert "Analytics" in prompt
+def test_persona_config(agent):
+    config = agent.get_persona_config()
+    assert isinstance(config, dict)
+    assert config["name"] == "user123 (Professional Mode)"
+    assert config["profession"] == "Engineer"
+    assert config["industry"] == "Tech"
