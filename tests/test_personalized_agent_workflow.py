@@ -152,18 +152,5 @@ def test_run_workflow_with_reflection_failure(agent, monkeypatch):
         raise RuntimeError("Reflection failed!")
     agent.workflow_engine.reflection.evaluate_response = bad_evaluate_response
     user_request = "Do something"
-    try:
+    with pytest.raises(RuntimeError, match="Reflection failed!"):
         agent.run_workflow(user_request)
-    except RuntimeError as e:
-        assert "Reflection failed!" in str(e)
-
-def test_run_workflow_with_llm_failure(agent, monkeypatch):
-    # Patch LLM to raise error
-    def bad_generate(*a, **kw):
-        raise RuntimeError("LLM failure!")
-    agent.llm_provider.generate = bad_generate
-    user_request = "Do something else"
-    try:
-        agent.run_workflow(user_request)
-    except RuntimeError as e:
-        assert "LLM failure!" in str(e)

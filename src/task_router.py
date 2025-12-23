@@ -7,7 +7,8 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 import json
 
-from .agent_base import BaseAgent, TaskResult
+from .agent_base import BaseAgent
+from .task_result import TaskResult
 from .agent_registry import AgentRegistry
 from .llm_provider import LLMProvider
 
@@ -61,89 +62,24 @@ class TaskRouter:
         self.llm_provider = llm_provider
         self.use_llm_routing = use_llm_routing and llm_provider is not None
         self.routing_history: List[RoutingDecision] = []
-    
-    def route_task(
-        self,
-        task: str,
-        context: Optional[Dict[str, Any]] = None,
-        preferred_role: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        conversation_history: Optional[List[Dict[str, Any]]] = None
-    ) -> Optional[BaseAgent]:
-        """
-        Route a task to the most suitable agent.
-        
-        Args:
-            task: Task description
-            context: Optional task context
-            preferred_role: Optional preferred agent role
-            agent_id: Optional specific agent ID to use
-            
-        Returns:
-            Selected agent or None if no suitable agent found
-        """
-        # Direct agent selection
-        if agent_id:
-            agent = self.registry.get(agent_id)
-            if agent:
-                self._record_routing(task, agent, 1.0, [])
-                return agent
-            print(f"Warning: Agent {agent_id} not found")
-        
-        # Filter by role if specified
-        candidates = self.registry.list_all()
-        if preferred_role:
-            candidates = self.registry.get_by_role(preferred_role)
-            if not candidates:
-                print(f"Warning: No agents found with role '{preferred_role}'")
-                candidates = self.registry.list_all()
-        
-        # Merge conversation history into context if provided
-        context_with_history = dict(context) if context else {}
-        if conversation_history:
-            context_with_history["conversation_history"] = conversation_history
 
-        # Get confidence scores
-        scored_agents = []
-        for agent in candidates:
-            confidence = agent.can_handle_task(task, context_with_history)
-            if confidence >= self.min_confidence:
-                scored_agents.append((agent, confidence))
-        
-        # Use LLM-based routing if enabled and we have multiple candidates
-        if self.use_llm_routing and len(scored_agents) > 1:
-            scored_agents = self._enhance_routing_with_llm(task, scored_agents, context_with_history)
-        
-        if not scored_agents:
-            # Try default agent
-            if self.default_agent_id:
-                default_agent = self.registry.get(self.default_agent_id)
-                if default_agent:
-                    print(f"No suitable agent found. Using default: {self.default_agent_id}")
-                    self._record_routing(task, default_agent, 0.0, [])
-                    return default_agent
-            
-            print(f"No agent available to handle task: {task[:50]}...")
-            return None
-        
-        # Sort by confidence (descending)
-        scored_agents.sort(key=lambda x: x[1], reverse=True)
-        
-        # Select best agent
-        best_agent, best_confidence = scored_agents[0]
-        
-        # Record alternatives
-        alternatives = [
-            {
-                "agent_id": agent.agent_id,
-                "role": agent.role,
-                "confidence": confidence
-            }
-            for agent, confidence in scored_agents[1:6]  # Top 5 alternatives
-        ]
-        
-        self._record_routing(task, best_agent, best_confidence, alternatives)
-        return best_agent
+    # All task routing is now unified through SingleUseAgent
+    from src.single_use_agent import SingleUseAgent
+    from src.agent_messaging import AgentMessage
+
+    def __init__(self, agent_id: str, initial_mode: str = 'greeting'):
+        self.agent_id = agent_id
+        self._single_use_agent = SingleUseAgent(agent_id, initial_mode=initial_mode)
+
+    def handle_message(self, message: AgentMessage) -> AgentMessage:
+        result = self._single_use_agent.process_turn(message.payload.get('user_message', ''))
+        return AgentMessage(
+            sender=self.agent_id,
+            receiver=message.sender,
+            intent='response',
+            payload={'result': result},
+            metadata={}
+        )
     
     def execute_task(
         self,

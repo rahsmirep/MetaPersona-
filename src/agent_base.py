@@ -5,63 +5,28 @@ Provides common interface for all agents in the MetaPersona ecosystem.
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+from pkg_resources import _initialize
 from pydantic import BaseModel, Field
 import json
 from pathlib import Path
 
+from src.skills import base
+
+
 from .skills.manager import SkillManager
 from .llm_provider import LLMProvider
+from .task_result import TaskResult
+from .agent_memory import AgentMemory # type: ignore
+
 
 
 class AgentCapability(BaseModel):
     """Represents a capability that an agent has."""
     name: str
     description: str
-    confidence: float = Field(ge=0.0, le=1.0, default=0.8)
-    examples: List[str] = Field(default_factory=list)
-
-
-class AgentMemory(BaseModel):
-    """Agent's memory of interactions and learnings."""
-    agent_id: str
-    interactions: List[Dict[str, Any]] = Field(default_factory=list)
-    learnings: List[str] = Field(default_factory=list)
-    context: Dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
-
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-
-
-class TaskResult(BaseModel):
-    """Result of a task execution."""
-    success: bool
-    result: Any
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.now)
-
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 class BaseAgent(ABC):
-    """
-    Base class for all agents in the multi-agent system.
-    
-    All agents must:
-    - Have a unique role and description
-    - Define their capabilities
-    - Handle tasks appropriately
-    - Maintain memory of interactions
-    - Support skill integration
-    """
-    
     def __init__(
         self,
         agent_id: str,
@@ -73,9 +38,8 @@ class BaseAgent(ABC):
     ):
         """
         Initialize a base agent.
-        
         Args:
-            agent_id: Unique identifier for the agent
+            agent_id: unique identifier for the agent
             role: Agent's role (e.g., "researcher", "coder", "writer")
             description: What the agent specializes in
             llm_provider: LLM provider for generating responses
@@ -89,10 +53,8 @@ class BaseAgent(ABC):
         self.skills_manager = skills_manager or SkillManager()
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        
         # Load or initialize memory
         self.memory = self._load_memory()
-        
         # Define capabilities (subclasses should override)
         self.capabilities = self._define_capabilities()
     
@@ -207,7 +169,7 @@ Always work within your role and capabilities. Be helpful, accurate, and efficie
         """
         return self.memory.interactions[-limit:]
     
-    def _load_memory(self) -> AgentMemory:
+    def _load_memory(self) -> AgentMemory: # type: ignore
         """Load agent memory from disk."""
         memory_file = self.data_dir / f"{self.agent_id}_memory.json"
         
@@ -215,7 +177,7 @@ Always work within your role and capabilities. Be helpful, accurate, and efficie
             try:
                 with open(memory_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    return AgentMemory(**data)
+                    return AgentMemory(**data) # type: ignore
             except Exception as e:
                 print(f"Warning: Could not load memory for {self.agent_id}: {e}")
         

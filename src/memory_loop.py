@@ -35,41 +35,9 @@ class MemoryLoop:
             response=response,
             tags=tags or []
         )
-        
-        # Append to memory file
         with open(self.memory_path, 'a', encoding='utf-8') as f:
             f.write(interaction.model_dump_json() + '\n')
-        
         return interaction
-    
-    def add_feedback(self, interaction_index: int, score: float, text: str = None):
-        """Add feedback to a specific interaction."""
-        interactions = self.load_all_interactions()
-        
-        if 0 <= interaction_index < len(interactions):
-            interactions[interaction_index].feedback_score = score
-            interactions[interaction_index].feedback_text = text
-            
-            # Rewrite memory file
-            with open(self.memory_path, 'w', encoding='utf-8') as f:
-                for interaction in interactions:
-                    f.write(interaction.model_dump_json() + '\n')
-            
-            print(f"✓ Feedback recorded: {score:.1f}/5.0")
-            return True
-        return False
-    
-    def load_all_interactions(self) -> List[Interaction]:
-        """Load all recorded interactions."""
-        if not self.memory_path.exists():
-            return []
-        
-        interactions = []
-        with open(self.memory_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.strip():
-                    interactions.append(Interaction.model_validate_json(line))
-        return interactions
     
     def get_recent_interactions(self, count: int = 10) -> List[Interaction]:
         """Get most recent interactions."""

@@ -5,7 +5,8 @@ from .persona_agent import PersonaAgent, AgentManager
 from .memory_loop import MemoryLoop
 from .llm_provider import get_llm_provider
 from .skills import Skill, SkillRegistry, SkillManager
-from .agent_base import BaseAgent, AgentCapability, TaskResult
+from .agent_base import BaseAgent, AgentCapability
+from .task_result import TaskResult
 from .agent_registry import AgentRegistry
 from .task_router import TaskRouter, RoutingDecision
 from .specialized_agents import ResearchAgent, CodeAgent, WriterAgent, GeneralistAgent

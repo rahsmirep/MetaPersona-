@@ -9,212 +9,34 @@ from .profession.workflow_engine import WorkflowEngine
 from src.agent_messaging import AgentMessagingProtocol, AgentMessage
 from src.router import Router
 
+
+# Unified MetaPersona agent: all cognition is routed through SingleUseAgent.process_turn(message)
+from src.single_use_agent import SingleUseAgent
+from src.agent_messaging import AgentMessage
+
 class PersonalizedAgent(AgentMessagingProtocol):
-    def _reasoning_pipeline(self, user_query: str, conversation_history=None) -> str:
-        """
-        Unified generate → reflect → refine reasoning pipeline.
-        """
-        from .profession.reasoning import ProfessionReasoningLayer
-        from .profession.reflection_engine import ReflectionEngine
-        reasoning_layer = ProfessionReasoningLayer(self.llm_provider)
-        reflection_engine = ReflectionEngine(self.llm_provider)
-
-        # Step 1: Generate initial answer
-        initial_answer = reasoning_layer.enhance_prompt(
-            user_query,
-            self.profession_schema,
-            self.cognitive_profile,
-            conversation_history or []
-        )
-
-        # Step 2: Reflect on the answer
-        eval_result = reflection_engine.evaluate_response(initial_answer, self.profession_schema)
-
-        # Step 3: Refine if necessary
-        if eval_result.get("needs_refinement"):
-            final_answer = reflection_engine.refine_response(initial_answer, self.profession_schema, eval_result)
-            return final_answer
-        else:
-            return initial_answer
-
-    def onboard_from_text(self, raw_text: str, user_id: str):
-        """
-        Onboard or update profession schema from raw onboarding text, including knowledge expansion.
-        """
-        interpreter = ProfessionSchemaInterpreter(self.llm_provider)
-        schema = interpreter.extract_schema(raw_text, user_id)
-
-        # Knowledge Expansion Layer integration
-        google_api_key = os.getenv("GOOGLE_API_KEY", "dummy")
-        google_cse_id = os.getenv("GOOGLE_SEARCH_ENGINE_ID", "dummy")
-        knowledge_expander = KnowledgeExpansionLayer(
-            llm_provider=self.llm_provider,
-            google_api_key=google_api_key,
-            google_cse_id=google_cse_id
-        )
-        enriched_schema = knowledge_expander.expand_schema(schema)
-        self.profession_schema = enriched_schema
-
-        self.aligned_persona = self.alignment.create_aligned_persona(
-            self.profession_schema,
-            self.cognitive_profile
-        )
-    def __init__(
-        self,
-        user_id: str,
-        profession_schema: ProfessionSchema,
-        cognitive_profile: CognitiveProfile,
-        llm_provider: Any,
-        router: Router = None
-    ):
-        # Validate input types
-        if not isinstance(profession_schema, ProfessionSchema):
-            raise TypeError("profession_schema must be a ProfessionSchema instance")
-        if not isinstance(cognitive_profile, CognitiveProfile):
-            raise TypeError("cognitive_profile must be a CognitiveProfile instance")
-
-        # Optionally, check for required attributes
-        required_prof_attrs = [
-            'profession_name', 'industry', 'decision_patterns', 'tools_equipment',
-            'skill_hierarchy', 'constraints', 'environment', 'role_definition', 'safety_rules', 'terminology'
-        ]
-        for attr in required_prof_attrs:
-            if not hasattr(profession_schema, attr):
-                raise AttributeError(f"ProfessionSchema missing required attribute: {attr}")
-
-        required_cog_attrs = ['user_id', 'writing_style', 'decision_pattern']
-        for attr in required_cog_attrs:
-            if not hasattr(cognitive_profile, attr):
-                raise AttributeError(f"CognitiveProfile missing required attribute: {attr}")
-
-        self.user_id = user_id
-        self.profession_schema = profession_schema
-        self.cognitive_profile = cognitive_profile
-        self.llm_provider = llm_provider
-        self.router = router
-
-        # Alignment
-        self.alignment = ParallelSelfAlignment()
-        # Create aligned persona
-        self.aligned_persona = self.alignment.create_aligned_persona(
-            self.profession_schema,
-            self.cognitive_profile
-        )
-
-        # Workflow engine for multi-step reasoning
-        self.workflow_engine = WorkflowEngine(self, llm_provider, router=router)
-
-        # Register with router if provided
-        if self.router:
-            self.router.register_agent(self.user_id, self.handle_message)
+    def __init__(self, agent_id: str, initial_mode: str = 'greeting'):
+        self.agent_id = agent_id
+        self._single_use_agent = SingleUseAgent(agent_id, initial_mode=initial_mode)
 
     def handle_message(self, message: AgentMessage) -> AgentMessage:
-        """
-        Handle incoming agent-to-agent messages. Supports request, response, delegate, status_update.
-        Prevent infinite delegation recursion by checking trace_id and a max delegation depth.
-        """
-        # Prevent infinite recursion: check for delegation depth in metadata
-        max_delegation_depth = 5
-        depth = message.metadata.get("delegation_depth", 0)
-        if depth > max_delegation_depth:
-            return AgentMessage(
-                sender=self.user_id,
-                receiver=message.sender,
-                intent="error",
-                payload={"error": "Delegation recursion limit exceeded."},
-                metadata={"in_response_to": message.metadata.get("trace_id")}
-            )
-        # Prevent self-delegation loop
-        if message.sender == self.user_id and message.intent == "request":
-            return AgentMessage(
-                sender=self.user_id,
-                receiver=message.sender,
-                intent="error",
-                payload={"error": "Self-delegation detected."},
-                metadata={"in_response_to": message.metadata.get("trace_id")}
-            )
-        if message.intent == "request":
-            # Treat as a workflow request
-            # Pass message.metadata as context to track delegation_depth
-            context = dict(message.metadata) if message.metadata else {}
-            result = self.run_workflow(message.payload.get("user_request", ""), conversation_history=message.payload.get("history"), context=context)
-            return AgentMessage(
-                sender=self.user_id,
-                receiver=message.sender,
-                intent="response",
-                payload={"result": result},
-                metadata={"in_response_to": message.metadata.get("trace_id")}
-            )
-        elif message.intent == "delegate":
-            # Delegate a subtask to another agent (if router is present)
-            if self.router:
-                delegate_to = message.payload.get("delegate_to")
-                subtask = message.payload.get("subtask")
-                # Increment delegation depth
-                new_metadata = dict(message.metadata)
-                new_metadata["delegation_depth"] = depth + 1
-                response = self.router.delegate_task(
-                    from_agent=self.user_id,
-                    to_agent=delegate_to,
-                    intent="request",
-                    payload={"user_request": subtask},
-                    metadata={"delegated_by": self.user_id, "parent_trace_id": message.metadata.get("trace_id"), "delegation_depth": depth + 1}
-                )
-                return AgentMessage(
-                    sender=self.user_id,
-                    receiver=message.sender,
-                    intent="response",
-                    payload={"delegation_result": response.payload if response else None},
-                    metadata={"in_response_to": message.metadata.get("trace_id")}
-                )
-            else:
-                return AgentMessage(
-                    sender=self.user_id,
-                    receiver=message.sender,
-                    intent="response",
-                    payload={"error": "No router available for delegation."},
-                    metadata={"in_response_to": message.metadata.get("trace_id")}
-                )
-        elif message.intent == "status_update":
-            # Accept and acknowledge status updates
-            return AgentMessage(
-                sender=self.user_id,
-                receiver=message.sender,
-                intent="acknowledge",
-                payload={"status": "received"},
-                metadata={"in_response_to": message.metadata.get("trace_id")}
-            )
-        else:
-            # Unknown intent
-            return AgentMessage(
-                sender=self.user_id,
-                receiver=message.sender,
-                intent="error",
-                payload={"error": f"Unknown intent: {message.intent}"},
-                metadata={"in_response_to": message.metadata.get("trace_id")}
-            )
-    def run_workflow(self, user_request: str, conversation_history=None, context=None) -> str:
-        """
-        Use WorkflowEngine to plan, execute, and assemble a multi-step reasoning workflow.
-        """
-        # Step 1: Plan
-        steps = self.workflow_engine.plan_generation(user_request)
-        # Step 2: Execute steps (with reflection after each)
-        context = context or {}
-        context.setdefault("history", conversation_history or [])
-        step_results = self.workflow_engine.step_execution(steps, context=context)
-        # Step 3: Assemble final output
-        final_output = self.workflow_engine.assemble_final_output(step_results)
-        return final_output
+        # All cognition is unified through SingleUseAgent
+        result = self._single_use_agent.process_turn(message.payload.get('user_message', ''))
+        return AgentMessage(
+            sender=self.agent_id,
+            receiver=message.sender,
+            intent='response',
+            payload={'result': result},
+            metadata={}
+        )
 
     def get_persona_config(self) -> Dict[str, Any]:
-        return self.aligned_persona
+        # Optionally return config from SingleUseAgent or static config
+        return {'agent_id': self.agent_id, 'mode': self._single_use_agent.get_mode()}
 
     def generate_prompt(self, user_query: str, conversation_history=None) -> str:
-        """
-        Use the unified reasoning pipeline for single-step reasoning.
-        """
-        return self._reasoning_pipeline(user_query, conversation_history)
+        # Route prompt through unified cognition
+        return self._single_use_agent.process_turn(user_query)
 
 # Example usage (for testing, remove in production)
 if __name__ == "__main__":

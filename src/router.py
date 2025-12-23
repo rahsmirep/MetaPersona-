@@ -1,8 +1,57 @@
+
+
 from typing import Dict, Callable, Optional, List, Any
 from src.agent_messaging import AgentMessage
 import time
+from src.mode_manager import ModeManager
+from src.short_term_memory import ShortTermMemory
+from src.task_context import TaskContext
 
 class Router:
+    def __init__(self, mode_manager: ModeManager = None, memory: ShortTermMemory = None, task_context: TaskContext = None):
+        self._agents: Dict[str, Callable[[AgentMessage], AgentMessage]] = {}
+        self._log: List[Dict] = []
+        self._task_lineage: Dict[str, List[Dict]] = {}  # trace_id -> list of delegation hops
+        self.mode_manager = mode_manager or ModeManager()
+        self.memory = memory or ShortTermMemory()
+        self.task_context = task_context or TaskContext()
+    def log_routing_trace(self, message, handler_name=None, reason=None, fallback_triggered=False, override_triggered=False, prev_mode=None, new_mode=None, mode_reason=None):
+        """
+        Structured diagnostic logging for routing trace.
+        Prints:
+            - Raw user message
+            - Classifier's predicted intent
+            - Confidence score/signal (if available)
+            - Handler selected
+            - Reason for handler selection
+            - Fallback/override logic
+        """
+        print("\n[ROUTING TRACE INSPECTOR]")
+        # Raw user message
+        user_msg = getattr(message, 'payload', {}).get('user_message') or getattr(message, 'payload', {}).get('text') or str(getattr(message, 'payload', {}))
+        print(f"  Raw user message: {user_msg}")
+        # Classifier prediction and confidence
+        intent = getattr(message, 'metadata', {}).get('predicted_intent') or getattr(message, 'intent', None)
+        confidence = getattr(message, 'metadata', {}).get('confidence') or getattr(message, 'metadata', {}).get('score')
+        print(f"  Predicted intent: {intent}")
+        print(f"  Confidence/score: {confidence}")
+        # Handler selected
+        print(f"  Handler selected: {handler_name}")
+        print(f"  Reason: {reason}")
+        print(f"  Fallback triggered: {fallback_triggered}")
+        print(f"  Override triggered: {override_triggered}")
+        if prev_mode is not None or new_mode is not None:
+            print(f"  Previous mode: {prev_mode}")
+            print(f"  New mode: {new_mode}")
+            print(f"  Mode transition reason: {mode_reason}")
+        print("[END ROUTING TRACE INSPECTOR]\n")
+
+        # Log memory snapshot
+        print("[MEMORY SNAPSHOT]")
+        mem = self.memory.snapshot()
+        for k, v in mem.items():
+            print(f"  {k}: {v}")
+        print("[END MEMORY SNAPSHOT]\n")
     def route_message(self, msg):
         print(f"[ROUTER] route_message called: sender={msg.sender}, receiver={msg.receiver}, fragment_id={msg.payload.get('fragment', {}).get('fragment_id', 'N/A')}")
         handler = self._agents.get(msg.receiver)
@@ -75,10 +124,7 @@ class Router:
     Designed for future parallel execution support.
     Tracks delegation decisions and task lineage for traceability.
     """
-    def __init__(self):
-        self._agents: Dict[str, Callable[[AgentMessage], AgentMessage]] = {}
-        self._log: List[Dict] = []
-        self._task_lineage: Dict[str, List[Dict]] = {}  # trace_id -> list of delegation hops
+    # Removed duplicate __init__ (see above)
 
     def register_agent(self, agent_id: str, handler: Callable[[AgentMessage], AgentMessage]):
         self._agents[agent_id] = handler
@@ -91,46 +137,149 @@ class Router:
 
     def route_message(self, message: AgentMessage) -> Optional[AgentMessage]:
         self._log_event('route', message.sender, message.receiver, message.intent, message.payload, message.metadata)
-        handler = self._agents.get(message.receiver)
-        if handler:
-            response = handler(message)
-            self._log_event('response', message.receiver, message.sender, response.intent, response.payload, response.metadata)
-            return response
+
+        # --- Unified cognitive decision pipeline ---
+        metadata = getattr(message, 'metadata', {}) or {}
+        predicted_intent = metadata.get('predicted_intent') or getattr(message, 'intent', None)
+        confidence = metadata.get('confidence') or metadata.get('score')
+        user_msg = getattr(message, 'payload', {}).get('user_message') or getattr(message, 'payload', {}).get('text') or ''
+        user_msg_lower = user_msg.lower() if isinstance(user_msg, str) else ''
+
+        # ABSOLUTE FIRST USER TURN: always use onboarding handler and return immediately
+        if len(self._log) == 0:
+            print("[ROUTER DEBUG] ABSOLUTE FIRST TURN: onboarding handler forced and returned immediately.")
+            handler = self._agents.get('agent_onboarding')
+            handler_name = handler.__name__ if handler else None
+            reason = 'ABSOLUTE FIRST TURN: onboarding handler forced.'
+            if handler:
+                return handler(message)
+            else:
+                return None
+
+        # Compose classifier_result for mode manager
+        classifier_result = {
+            'predicted_intent': predicted_intent,
+            'confidence': confidence,
+            'signals': metadata.get('signals', {}),
+        }
+        prev_mode = self.mode_manager.get_mode() if self.mode_manager else None
+        # Centralized, context-aware mode update
+        new_mode, mode_reason = self.mode_manager.update_mode(classifier_result, prev_mode, message_context=message.payload)
+
+        # --- Update short-term memory ---
+        self.memory.add_user_message({'message': user_msg, 'metadata': metadata})
+        self.memory.add_classifier_output(classifier_result)
+        self.memory.add_mode_transition(prev_mode, new_mode, mode_reason)
+
+        print(f"[ROUTER DEBUG] prev_mode={prev_mode}, new_mode={new_mode}, mode_reason={mode_reason}")
+        # Handler selection logic (mode-driven, context-aware)
+        handler = None
+        handler_name = None
+        reason = None
+        fallback_triggered = False
+        override_triggered = False
+
+        # Heuristic: if user_msg looks like a task, force mode to 'task-execution' and use task handler
+        if any(word in user_msg_lower for word in ["task", "do", "help"]):
+            print("[ROUTER DEBUG] Heuristic: user_msg looks like a task, forcing mode to 'task-execution' and using agent_task handler.")
+            new_mode = 'task-execution'
+            handler = self._agents.get('agent_task')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Heuristic: user_msg looks like a task.'
+        elif new_mode == 'task-execution':
+            print("[ROUTER DEBUG] Looking for handler: agent_task")
+            handler = self._agents.get('agent_task')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Handler selected for task-execution mode.'
+        elif new_mode == 'greeting' or new_mode == 'onboarding':
+            print("[ROUTER DEBUG] Using handler: agent_onboarding (for greeting/onboarding mode)")
+            handler = self._agents.get('agent_onboarding')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Handler selected for onboarding/greeting mode.'
+        elif new_mode == 'reflection':
+            print("[ROUTER DEBUG] Looking for handler: agent_reflection")
+            handler = self._agents.get('agent_reflection')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Handler selected for reflection mode.'
+        elif new_mode == 'error-recovery':
+            print("[ROUTER DEBUG] Looking for handler: agent_error_recovery")
+            handler = self._agents.get('agent_error_recovery')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Handler selected for error-recovery mode.'
         else:
-            self._log_event('route_failed', message.sender, message.receiver, message.intent, message.payload, message.metadata)
-            return None
+            print("[ROUTER DEBUG] Looking for handler: agent_fallback")
+            handler = self._agents.get('agent_fallback')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Fallback handler selected: unknown or ambiguous mode.'
+            fallback_triggered = True
 
-    def delegate_task(self, from_agent: str, to_agent: str, intent: str, payload: dict, metadata: dict = None) -> Optional[AgentMessage]:
-        msg = AgentMessage(sender=from_agent, receiver=to_agent, intent=intent, payload=payload, metadata=metadata or {})
-        # Log delegation decision
-        self._log_event('delegate', from_agent, to_agent, intent, payload, msg.metadata)
-        # Track task lineage
-        trace_id = msg.metadata.get('trace_id')
-        if trace_id:
-            hop = {
-                'from': from_agent,
-                'to': to_agent,
-                'intent': intent,
-                'payload': payload,
-                'metadata': msg.metadata,
-                'timestamp': time.time()
-            }
-            self._task_lineage.setdefault(trace_id, []).append(hop)
-        return self.route_message(msg)
+        # (Removed duplicate ABSOLUTE FIRST USER TURN blocks)
+        if new_mode == 'task-execution':
+            print("[ROUTER DEBUG] Looking for handler: agent_task")
+            handler = self._agents.get('agent_task')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Handler selected for task-execution mode.'
+        elif new_mode == 'greeting':
+            print("[ROUTER DEBUG] Looking for handler: agent_greeter")
+            handler = self._agents.get('agent_greeter')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Handler selected for greeting mode.'
+        elif new_mode == 'onboarding':
+            print("[ROUTER DEBUG] Looking for handler: agent_onboarding")
+            handler = self._agents.get('agent_onboarding')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Handler selected for onboarding mode.'
+        elif new_mode == 'reflection':
+            print("[ROUTER DEBUG] Looking for handler: agent_reflection")
+            handler = self._agents.get('agent_reflection')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Handler selected for reflection mode.'
+        elif new_mode == 'error-recovery':
+            print("[ROUTER DEBUG] Looking for handler: agent_error_recovery")
+            handler = self._agents.get('agent_error_recovery')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Handler selected for error-recovery mode.'
+        else:
+            print("[ROUTER DEBUG] Looking for handler: agent_fallback")
+            handler = self._agents.get('agent_fallback')
+            handler_name = handler.__name__ if handler else None
+            reason = 'Fallback handler selected: unknown or ambiguous mode.'
+            fallback_triggered = True
 
-    def get_task_lineage(self, trace_id: str):
-        return self._task_lineage.get(trace_id, [])
+        print(f"[ROUTER DEBUG] Handler found: {handler_name}")
 
-    def broadcast(self, from_agent: str, intent: str, payload: dict, metadata: dict = None) -> List[AgentMessage]:
-        responses = []
-        for agent_id in self._agents:
-            if agent_id != from_agent:
-                msg = AgentMessage(sender=from_agent, receiver=agent_id, intent=intent, payload=payload, metadata=metadata or {})
-                resp = self.route_message(msg)
-                if resp:
-                    responses.append(resp)
-        return responses
-
+        # Always return a valid AgentMessage with persona-styled output
+        from src.agent_messaging import AgentMessage
+        if handler:
+            try:
+                result = handler(message)
+                if isinstance(result, AgentMessage):
+                    return result
+                # If handler returns a string or dict, wrap it
+                return AgentMessage(
+                    sender="agent",
+                    receiver=message.sender,
+                    intent="response",
+                    payload={"result": result},
+                    metadata={}
+                )
+            except Exception as e:
+                return AgentMessage(
+                    sender="agent",
+                    receiver=message.sender,
+                    intent="response",
+                    payload={"result": f"[Error] {str(e)}"},
+                    metadata={}
+                )
+        else:
+            # Fallback: always return a persona-styled message
+            return AgentMessage(
+                sender="agent",
+                receiver=message.sender,
+                intent="response",
+                payload={"result": "[MetaPersona] I'm here, but I couldn't find a suitable handler for your request. (Fallback response)"},
+                metadata={}
+            )
     def _log_event(self, action: str, sender: str = None, receiver: str = None, intent: str = None, payload: dict = None, metadata: dict = None):
         self._log.append({
             'timestamp': time.time(),

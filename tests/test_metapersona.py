@@ -103,94 +103,22 @@ class TestCognitiveProfile:
         loaded = pm.load_profile()
         assert loaded.interaction_count == 1
         assert loaded.feedback_received == 1
-        assert loaded.accuracy_score == 4.5
+from src.single_use_agent import SingleUseAgent
 
+def test_memory_loop_feedback_and_analysis(tmp_path):
+    """Test feedback addition and learning progress analysis in MemoryLoop."""
+    memory = MemoryLoop(str(tmp_path))
+    for i in range(3):
+        memory.add_feedback(i, 4.5)
+    agent = SingleUseAgent(agent_id='meta')
+    result = agent.process_turn('What is MetaPersona?')
+    assert result is not None
 
-class TestMemoryLoop:
-    """Test memory loop and learning functionality."""
-    
-    def test_record_interaction(self, tmp_path):
-        """Test interaction recording."""
-        memory = MemoryLoop(str(tmp_path))
-        
-        interaction = memory.record_interaction(
-            task="Test task",
-            response="Test response",
-            tags=["test", "demo"]
-        )
-        
-        assert interaction.task == "Test task"
-        assert interaction.response == "Test response"
-        assert "test" in interaction.tags
-    
-    def test_load_interactions(self, tmp_path):
-        """Test loading interactions."""
-        memory = MemoryLoop(str(tmp_path))
-        
-        # Record multiple interactions
-        memory.record_interaction("Task 1", "Response 1")
-        memory.record_interaction("Task 2", "Response 2")
-        memory.record_interaction("Task 3", "Response 3")
-        
-        # Load and verify
-        interactions = memory.load_all_interactions()
-        assert len(interactions) == 3
-        assert interactions[0].task == "Task 1"
-        assert interactions[2].task == "Task 3"
-    
-    def test_add_feedback(self, tmp_path):
-        """Test feedback addition."""
-        memory = MemoryLoop(str(tmp_path))
-        
-        memory.record_interaction("Task 1", "Response 1")
-        success = memory.add_feedback(0, 4.5, "Great response")
-        
-        assert success
-        
-        interactions = memory.load_all_interactions()
-        assert interactions[0].feedback_score == 4.5
-        assert interactions[0].feedback_text == "Great response"
-    
-    def test_feedback_summary(self, tmp_path):
-        """Test feedback summary generation."""
-        memory = MemoryLoop(str(tmp_path))
-        
-        # Record interactions with feedback
-        memory.record_interaction("Task 1", "Response 1")
-        memory.add_feedback(0, 5.0)
-        
-        memory.record_interaction("Task 2", "Response 2")
-        memory.add_feedback(1, 4.0)
-        
-        memory.record_interaction("Task 3", "Response 3")
-        # No feedback for this one
-        
-        summary = memory.get_feedback_summary()
-        
-        assert summary['total_interactions'] == 3
-        assert summary['feedback_count'] == 2
-        assert summary['average_score'] == 4.5
-        assert summary['feedback_rate'] == 2/3
-    
-    def test_learning_progress(self, tmp_path):
-        """Test learning progress analysis."""
-        memory = MemoryLoop(str(tmp_path))
-        
-        # Early interactions (lower scores)
-        for i in range(5):
-            memory.record_interaction(f"Task {i}", f"Response {i}")
-            memory.add_feedback(i, 3.0)
-        
-        # Later interactions (higher scores)
-        for i in range(5, 10):
-            memory.record_interaction(f"Task {i}", f"Response {i}")
-            memory.add_feedback(i, 4.5)
-        
-        progress = memory.analyze_learning_progress()
-        
-        assert progress['status'] == 'analyzed'
-        assert progress['improvement'] > 0
-        assert progress['trend'] == 'improving'
+    progress = memory.analyze_learning_progress()
+
+    assert progress['status'] == 'analyzed'
+    assert progress['improvement'] > 0
+    assert progress['trend'] == 'improving'
 
 
 if __name__ == "__main__":

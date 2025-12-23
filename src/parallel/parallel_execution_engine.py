@@ -7,6 +7,24 @@ from src.parallel.fragment_dependency_graph import FragmentDependencyGraph
 import threading
 
 class ParallelExecutionEngine:
+    def log_fragment_states(self, fragment_ids):
+        """
+        Logs the state, dependencies, unresolved dependencies, and timestamps for each fragment.
+        """
+        from datetime import datetime
+        print("\n[FRAGMENT STATE INSPECTOR]")
+        for fid in fragment_ids:
+            fragment = self.shared_memory.read(f"fragment:{fid}")
+            state = fragment.get('state') if fragment else 'unknown'
+            updated_at = fragment.get('updated_at') if fragment else None
+            deps = []
+            unresolved = []
+            if hasattr(self, 'dependency_graph') and self.dependency_graph:
+                deps = list(self.dependency_graph.dependencies.get(fid, []))
+                unresolved = [d for d in deps if d not in self.dependency_graph.completed]
+            print(f"  Fragment {fid}: state={state}, deps={deps}, unresolved={unresolved}, updated_at={updated_at}, ts={datetime.now().isoformat(timespec='seconds')}")
+        print("[END FRAGMENT STATE INSPECTOR]\n")
+
     def wait_for_fragments(self, fragment_ids, timeout=30, poll_interval=0.5):
         """
         Wait for all given fragment_ids to reach 'completed' state in SharedBlackboard.
@@ -23,6 +41,7 @@ class ParallelExecutionEngine:
         try:
             while time.time() - start < timeout:
                 print(">>> Entered wait loop")
+                self.log_fragment_states(fragment_ids)
                 all_done = True
                 now = time.time()
                 for fid in fragment_ids:
@@ -143,6 +162,8 @@ class ParallelExecutionEngine:
             print(f"[_EXECUTE_FRAGMENT] ENTER: {fragment.fragment_id}")
             # Mark as in progress
             fragment.update_state("in_progress")
+            print(f"[_EXECUTE_FRAGMENT] State set to in_progress for {fragment.fragment_id}")
+            self.log_fragment_states([fragment.fragment_id])
             print(f"[_EXECUTE_FRAGMENT] SKIPPING AgentMessage import and instantiation for {fragment.fragment_id}")
             # from src.agent_messaging import AgentMessage
             # frag_dict = fragment.to_dict()
@@ -170,13 +191,13 @@ class ParallelExecutionEngine:
                 self.shared_memory.update(f"fragment:{fragment.fragment_id}", fragment.to_dict(), author="parallel_execution_engine", metadata={"plan_id": fragment.parent_plan_id, "assigned_agent": fragment.assigned_agent})
                 print(f"[_EXECUTE_FRAGMENT] Marking completed in dep graph for {fragment.fragment_id}")
                 dependency_graph.mark_completed(fragment.fragment_id)
+                print(f"[_EXECUTE_FRAGMENT] State after completion for {fragment.fragment_id}")
+                self.log_fragment_states([fragment.fragment_id])
             print(f"[_EXECUTE_FRAGMENT] EXIT: {fragment.fragment_id} state={fragment.state}")
             return fragment
         except Exception as e:
             print(f"[_EXECUTE_FRAGMENT] Exception in fragment {fragment.fragment_id}: {e}")
             raise
-        print(f"[_EXECUTE_FRAGMENT] EXIT: {fragment.fragment_id} state={fragment.state}")
-        return fragment
     def __init__(self, router, shared_memory, max_workers: int = 4):
         self.router = router
         self.shared_memory = shared_memory
