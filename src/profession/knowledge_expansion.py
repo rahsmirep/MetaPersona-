@@ -288,48 +288,117 @@ Return ONLY valid JSON."""
         }
     
     def _merge_expansion(self, schema: ProfessionSchema, area: str, data: Dict[str, Any]) -> ProfessionSchema:
-        """Merge expanded knowledge into schema."""
-        
-        # Map area to schema field
+        """Merge expanded knowledge into schema with traceability, conflict detection, and partial enrichment."""
+        trace = {
+            "timestamp": datetime.now().isoformat(),
+            "area": area,
+            "added": [],
+            "skipped": [],
+            "conflicts": [],
+            "source": data.get("sources", []),
+        }
+        def detect_conflict(existing_set, new_item):
+            # Enhanced contradiction detection: negations and logical opposites (e.g., ALWAYS vs NEVER)
+            def normalize(text):
+                return text.strip().lower()
+
+            def is_opposite(a, b):
+                a_norm, b_norm = normalize(a), normalize(b)
+                # Check for NEVER/ALWAYS contradiction
+                if a_norm.startswith("never ") and b_norm.startswith("always "):
+                    tail_a = a_norm[len("never "):].strip()
+                    tail_b = b_norm[len("always "):].strip()
+                    return tail_a == tail_b
+                if a_norm.startswith("always ") and b_norm.startswith("never "):
+                    tail_a = a_norm[len("always "):].strip()
+                    tail_b = b_norm[len("never "):].strip()
+                    return tail_a == tail_b
+                # Check for not/never
+                if a_norm in [f"never {b_norm}", f"not {b_norm}"] or b_norm in [f"never {a_norm}", f"not {a_norm}"]:
+                    return True
+                return False
+
+            for ex in existing_set:
+                if is_opposite(ex, new_item):
+                    return True
+            return False
+
         if area == "primary_responsibilities":
             existing = set(schema.role_definition.primary_responsibilities)
-            new_items = [item for item in data.get("key_points", []) if item not in existing]
-            schema.role_definition.primary_responsibilities.extend(new_items[:5])
-        
+            for item in data.get("key_points", []):
+                if item in existing:
+                    trace["skipped"].append(item)
+                elif detect_conflict(existing, item):
+                    trace["conflicts"].append(item)
+                else:
+                    schema.role_definition.primary_responsibilities.append(item)
+                    trace["added"].append(item)
+
         elif area == "software_tools":
             existing = set(schema.tools_equipment.software)
-            new_items = [item for item in data.get("key_points", []) if item not in existing]
-            schema.tools_equipment.software.extend(new_items[:5])
-        
+            for item in data.get("key_points", []):
+                if item in existing:
+                    trace["skipped"].append(item)
+                else:
+                    schema.tools_equipment.software.append(item)
+                    trace["added"].append(item)
+
         elif area == "daily_tasks":
             existing = set(schema.daily_tasks.routine)
-            new_items = [item for item in data.get("key_points", []) if item not in existing]
-            schema.daily_tasks.routine.extend(new_items[:5])
-        
+            for item in data.get("key_points", []):
+                if item in existing:
+                    trace["skipped"].append(item)
+                else:
+                    schema.daily_tasks.routine.append(item)
+                    trace["added"].append(item)
+
         elif area == "decision_frameworks":
             existing = set(schema.decision_patterns.decision_frameworks)
-            new_items = [item for item in data.get("key_points", []) if item not in existing]
-            schema.decision_patterns.decision_frameworks.extend(new_items[:3])
-        
+            for item in data.get("key_points", []):
+                if item in existing:
+                    trace["skipped"].append(item)
+                else:
+                    schema.decision_patterns.decision_frameworks.append(item)
+                    trace["added"].append(item)
+
         elif area == "safety_rules":
             existing = set(schema.safety_rules.best_practices)
-            new_items = [item for item in data.get("best_practices", []) if item not in existing]
-            schema.safety_rules.best_practices.extend(new_items[:5])
-        
+            for item in data.get("best_practices", []):
+                if item in existing:
+                    trace["skipped"].append(item)
+                elif detect_conflict(existing, item):
+                    trace["conflicts"].append(item)
+                else:
+                    schema.safety_rules.best_practices.append(item)
+                    trace["added"].append(item)
+
         elif area in ["best_practices", "industry_best_practices"]:
             existing = set(schema.safety_rules.best_practices)
-            new_items = [item for item in data.get("best_practices", []) if item not in existing]
-            schema.safety_rules.best_practices.extend(new_items[:5])
-        
+            for item in data.get("best_practices", []):
+                if item in existing:
+                    trace["skipped"].append(item)
+                elif detect_conflict(existing, item):
+                    trace["conflicts"].append(item)
+                else:
+                    schema.safety_rules.best_practices.append(item)
+                    trace["added"].append(item)
+
         elif area == "edge_cases":
             for point in data.get("key_points", [])[:3]:
-                schema.edge_cases.scenarios.append({"scenario": point, "response": "Requires further analysis"})
-        
+                scenario_obj = {"scenario": point, "response": "Requires further analysis"}
+                if scenario_obj in schema.edge_cases.scenarios:
+                    trace["skipped"].append(point)
+                else:
+                    schema.edge_cases.scenarios.append(scenario_obj)
+                    trace["added"].append(point)
+
         # Add sources to data sources
         for source in data.get("sources", []):
             if source not in schema.data_sources:
                 schema.data_sources.append(source)
-        
+
+        # Record trace in expansion_history
+        schema.expansion_history.append(trace)
         return schema
     
     def _detect_query_gaps(self, schema: ProfessionSchema, query: str) -> List[str]:

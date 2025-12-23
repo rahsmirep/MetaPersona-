@@ -1,463 +1,391 @@
-"""
-Personalized Multi-Agents
-Specialized agents that act in YOUR style while having different expertise areas.
-"""
-from typing import Dict, List, Any, Optional
-from .agent_base import BaseAgent, AgentCapability, TaskResult
+from typing import Any, Dict
+from .profession.schema import ProfessionSchema
+from .profession.profession_schema_interpreter import ProfessionSchemaInterpreter
+from .profession.knowledge_expansion import KnowledgeExpansionLayer
+import os
 from .cognitive_profile import CognitiveProfile
-from .llm_provider import LLMProvider
-from .skills.manager import SkillManager
-import json
+from .profession.reasoning import ParallelSelfAlignment
+from .profession.workflow_engine import WorkflowEngine
+from src.agent_messaging import AgentMessagingProtocol, AgentMessage
+from src.router import Router
 
+class PersonalizedAgent(AgentMessagingProtocol):
+    def _reasoning_pipeline(self, user_query: str, conversation_history=None) -> str:
+        """
+        Unified generate → reflect → refine reasoning pipeline.
+        """
+        from .profession.reasoning import ProfessionReasoningLayer
+        from .profession.reflection_engine import ReflectionEngine
+        reasoning_layer = ProfessionReasoningLayer(self.llm_provider)
+        reflection_engine = ReflectionEngine(self.llm_provider)
 
-class PersonalizedBaseAgent(BaseAgent):
-    """
-    Base agent that combines multi-agent capabilities with your personal cognitive profile.
-    All specialized agents inherit from this to maintain YOUR style.
-    """
-    
-    def __init__(
-        self,
-        agent_id: str,
-        role: str,
-        description: str,
-        cognitive_profile: CognitiveProfile,
-        llm_provider: LLMProvider,
-        skills_manager: Optional[SkillManager] = None
-    ):
-        super().__init__(agent_id, role, description, llm_provider, skills_manager)
-        self.cognitive_profile = cognitive_profile
-        
-    def get_system_prompt(self) -> str:
-        """Build system prompt that includes both role specialization and personal style."""
-        base_prompt = f"""You are a specialized AI agent for Persona.
-
-**Your Role:** {self.role}
-**Specialization:** {self.description}
-
-**Personal Writing Style (maintain this across all responses):**
-- Tone: {self.cognitive_profile.writing_style.tone}
-- Vocabulary Level: {self.cognitive_profile.writing_style.vocabulary_level}
-- Sentence Structure: {self.cognitive_profile.writing_style.sentence_structure}
-- Punctuation Style: {self.cognitive_profile.writing_style.punctuation_style}
-
-**Decision-Making Approach:**
-- Style: {self.cognitive_profile.decision_pattern.approach}
-- Risk Tolerance: {self.cognitive_profile.decision_pattern.risk_tolerance}
-
-**Your Capabilities:**
-"""
-        for cap in self.capabilities:
-            base_prompt += f"\n- {cap.name}: {cap.description}"
-        
-        base_prompt += f"""
-
-**Important:** 
-- You ARE Persona, but specialized in {self.role}
-- Respond in THEIR writing style, not a generic AI style
-- Apply your specialized expertise while maintaining their personality
-- Think and communicate as they would in your domain of expertise
-"""
-        return base_prompt
-
-
-class PersonalizedResearchAgent(PersonalizedBaseAgent):
-    """Research agent that conducts research in YOUR style."""
-    
-    def _define_capabilities(self) -> List[AgentCapability]:
-        return [
-            AgentCapability(
-                name="research_and_analysis",
-                description="Research and analyze information in user's analytical style",
-                confidence=0.9,
-                examples=["research", "find information", "analyze", "investigate"]
-            ),
-            AgentCapability(
-                name="information_synthesis",
-                description="Synthesize findings in user's communication style",
-                confidence=0.85,
-                examples=["summarize", "synthesize", "combine information"]
-            )
-        ]
-    
-    def can_handle_task(self, task: str, context: Optional[Dict[str, Any]] = None) -> float:
-        task_lower = task.lower()
-        
-        # Exclude other domains
-        if any(kw in task_lower for kw in ["write code", "write a function", "program"]):
-            return 0.2
-        if any(kw in task_lower for kw in ["write email", "write letter", "draft"]):
-            return 0.2
-        
-        # High confidence for research tasks
-        if any(kw in task_lower for kw in ["research", "find information", "search for", "investigate"]):
-            return 0.9
-        
-        # Medium for analysis
-        if any(kw in task_lower for kw in ["analyze", "compare", "evaluate", "assess"]):
-            return 0.75
-        
-        return 0.3
-    
-    def handle_task(self, task: str, context: Optional[Dict[str, Any]] = None, use_skills: bool = True) -> TaskResult:
-        """Execute research task."""
-        messages = [
-            {"role": "system", "content": self.get_system_prompt()},
-            {"role": "user", "content": task}
-        ]
-        response = self.llm_provider.generate(messages, temperature=0.7)
-        return TaskResult(success=True, result=response, metadata={"agent_id": self.agent_id})
-
-
-class PersonalizedCodeAgent(PersonalizedBaseAgent):
-    """Coding agent that writes code in YOUR style."""
-    
-    def _define_capabilities(self) -> List[AgentCapability]:
-        return [
-            AgentCapability(
-                name="code_development",
-                description="Write code following user's coding patterns and preferences",
-                confidence=0.95,
-                examples=["write code", "create function", "implement", "develop"]
-            ),
-            AgentCapability(
-                name="debugging",
-                description="Debug and fix code in user's problem-solving style",
-                confidence=0.85,
-                examples=["debug", "fix", "error", "issue"]
-            )
-        ]
-    
-    def can_handle_task(self, task: str, context: Optional[Dict[str, Any]] = None) -> float:
-        task_lower = task.lower()
-        
-        # Exclude writing/research
-        if any(kw in task_lower for kw in ["write email", "write article", "write letter", "draft"]):
-            return 0.15
-        if "research" in task_lower and "code" not in task_lower:
-            return 0.2
-        
-        # Very high for explicit coding
-        if any(phrase in task_lower for phrase in ["write code", "write a function", "write a script", "create a program"]):
-            return 0.95
-        
-        # High for languages and technical terms
-        languages = ["python", "javascript", "java", "c++", "rust", "go", "typescript"]
-        if any(lang in task_lower for lang in languages):
-            return 0.9
-        
-        # Medium for technical terms
-        if any(kw in task_lower for kw in ["function", "class", "api", "algorithm", "debug"]):
-            return 0.7
-        
-        return 0.3
-    
-    def handle_task(self, task: str, context: Optional[Dict[str, Any]] = None, use_skills: bool = True) -> TaskResult:
-        """Execute coding task."""
-        messages = [
-            {"role": "system", "content": self.get_system_prompt()},
-            {"role": "user", "content": task}
-        ]
-        response = self.llm_provider.generate(messages, temperature=0.7)
-        return TaskResult(success=True, result=response, metadata={"agent_id": self.agent_id})
-
-
-class PersonalizedWriterAgent(PersonalizedBaseAgent):
-    """Writing agent that creates content in YOUR style."""
-    
-    def _define_capabilities(self) -> List[AgentCapability]:
-        return [
-            AgentCapability(
-                name="professional_writing",
-                description="Write professional documents in user's voice",
-                confidence=0.95,
-                examples=["write email", "write letter", "draft memo", "compose message"]
-            ),
-            AgentCapability(
-                name="content_creation",
-                description="Create articles and content in user's writing style",
-                confidence=0.9,
-                examples=["write article", "write blog", "create content"]
-            )
-        ]
-    
-    def can_handle_task(self, task: str, context: Optional[Dict[str, Any]] = None) -> float:
-        task_lower = task.lower()
-        
-        # Exclude code and research
-        if any(kw in task_lower for kw in ["code", "function", "program", "script"]):
-            return 0.15
-        if "research" in task_lower and not any(kw in task_lower for kw in ["write", "draft", "compose"]):
-            return 0.2
-        
-        # Very high for professional documents
-        if any(phrase in task_lower for phrase in ["write email", "write letter", "write memo", "draft email"]):
-            return 0.95
-        
-        # High for content creation
-        if any(kw in task_lower for kw in ["article", "blog", "post", "essay", "report"]):
-            return 0.9
-        
-        # Medium for general writing
-        if any(kw in task_lower for kw in ["write", "compose", "draft", "create"]):
-            return 0.7
-        
-        return 0.3
-    
-    def handle_task(self, task: str, context: Optional[Dict[str, Any]] = None, use_skills: bool = True) -> TaskResult:
-        """Execute writing task."""
-        messages = [
-            {"role": "system", "content": self.get_system_prompt()},
-            {"role": "user", "content": task}
-        ]
-        response = self.llm_provider.generate(messages, temperature=0.7)
-        return TaskResult(success=True, result=response, metadata={"agent_id": self.agent_id})
-
-
-class PersonalizedGeneralistAgent(PersonalizedBaseAgent):
-    """Generalist agent for conversations in YOUR style."""
-    
-    def _define_capabilities(self) -> List[AgentCapability]:
-        return [
-            AgentCapability(
-                name="conversation",
-                description="Natural conversation in user's communication style",
-                confidence=0.8,
-                examples=["chat", "discuss", "explain", "help"]
-            ),
-            AgentCapability(
-                name="general_assistance",
-                description="General tasks and questions in user's decision-making style",
-                confidence=0.7,
-                examples=["help with", "tell me about", "what is", "how to"]
-            )
-        ]
-    
-    def can_handle_task(self, task: str, context: Optional[Dict[str, Any]] = None) -> float:
-        """Handle general tasks with moderate confidence."""
-        task_lower = task.lower()
-        
-        # Lower confidence for specialized tasks
-        specialized_keywords = [
-            "research", "search for", "find information",
-            "write code", "function", "program",
-            "write email", "write letter", "draft"
-        ]
-        
-        if any(kw in task_lower for kw in specialized_keywords):
-            return 0.3
-        
-        # Good for explanations and conversations
-        return 0.5
-    
-    def handle_task(self, task: str, context: Optional[Dict[str, Any]] = None, use_skills: bool = True) -> TaskResult:
-        """Execute general task."""
-        messages = [
-            {"role": "system", "content": self.get_system_prompt()},
-            {"role": "user", "content": task}
-        ]
-        response = self.llm_provider.generate(messages, temperature=0.7)
-        return TaskResult(success=True, result=response, metadata={"agent_id": self.agent_id})
-
-
-class PersonalizedProfessionAgent(PersonalizedBaseAgent):
-    """Professional expert agent that uses profession schema and acts in YOUR professional style."""
-    
-    def __init__(
-        self,
-        agent_id: str,
-        role: str,
-        description: str,
-        cognitive_profile: CognitiveProfile,
-        llm_provider: LLMProvider,
-        profession_schema,
-        skills_manager: Optional[SkillManager] = None
-    ):
-        # Set profession_schema BEFORE calling super().__init__
-        # because _define_capabilities() needs it
-        self.profession_schema = profession_schema
-        
-        super().__init__(agent_id, role, description, cognitive_profile, llm_provider, skills_manager)
-        
-        # Initialize profession reasoning layer
-        from .profession import ProfessionReasoningLayer, ParallelSelfAlignment
-        self.reasoning = ProfessionReasoningLayer(llm_provider)
-        self.alignment = ParallelSelfAlignment()
-        
-        # Create aligned persona
-        self.aligned_persona = self.alignment.create_aligned_persona(
-            profession_schema,
-            cognitive_profile
-        )
-    
-    def _define_capabilities(self) -> List[AgentCapability]:
-        """Capabilities based on profession schema."""
-        capabilities = [
-            AgentCapability(
-                name="professional_expertise",
-                description=f"Expert in {self.profession_schema.profession_name} - {self.profession_schema.industry}",
-                confidence=0.95,
-                examples=[
-                    self.profession_schema.profession_name.lower(),
-                    self.profession_schema.industry.lower()
-                ]
-            ),
-            AgentCapability(
-                name="professional_decisions",
-                description=f"Make decisions using {self.profession_schema.profession_name} frameworks and best practices",
-                confidence=0.9,
-                examples=["decision", "should i", "recommend", "advise"]
-            ),
-            AgentCapability(
-                name="safety_validation",
-                description="Validate responses against professional safety rules",
-                confidence=0.95,
-                examples=["safe", "compliant", "allowed"]
-            )
-        ]
-        
-        # Add capabilities for key tools
-        if self.profession_schema.tools_equipment.software:
-            capabilities.append(
-                AgentCapability(
-                    name="tools_expertise",
-                    description=f"Expert with tools: {', '.join(self.profession_schema.tools_equipment.software[:5])}",
-                    confidence=0.85,
-                    examples=self.profession_schema.tools_equipment.software[:5]
-                )
-            )
-        
-        return capabilities
-    
-    def can_handle_task(self, task: str, context: Optional[Dict[str, Any]] = None) -> float:
-        """Determine if task is related to this profession."""
-        task_lower = task.lower()
-        
-        # Check profession name and industry
-        if self.profession_schema.profession_name.lower() in task_lower:
-            return 0.95
-        if self.profession_schema.industry.lower() in task_lower:
-            return 0.9
-        
-        # Check tools
-        for tool in self.profession_schema.tools_equipment.software[:10]:
-            if tool.lower() in task_lower:
-                return 0.85
-        
-        # Check terminology/jargon
-        for term in list(self.profession_schema.terminology.jargon.keys())[:20]:
-            if term.lower() in task_lower:
-                return 0.8
-        
-        for acronym in list(self.profession_schema.terminology.acronyms.keys())[:20]:
-            if acronym.lower() in task_lower:
-                return 0.8
-        
-        # Check responsibilities keywords
-        for resp in self.profession_schema.role_definition.primary_responsibilities[:10]:
-            # Extract key nouns/verbs from responsibilities
-            resp_words = set(resp.lower().split())
-            task_words = set(task_lower.split())
-            if len(resp_words & task_words) >= 2:  # At least 2 matching words
-                return 0.75
-        
-        # Check decision-making keywords
-        decision_keywords = ["should i", "recommend", "advise", "best practice", "how to"]
-        if any(kw in task_lower for kw in decision_keywords):
-            return 0.6
-        
-        return 0.3
-    
-    def get_system_prompt(self) -> str:
-        """Build system prompt with profession context and aligned persona."""
-        # Use aligned persona system prompt
-        aligned_prompt = self.alignment.generate_system_prompt(
-            self.aligned_persona
-        )
-        
-        # Add role context
-        profession_context = f"""
-
-**Your Specialized Role:** {self.role}
-**Professional Identity:** {self.profession_schema.profession_name} in {self.profession_schema.industry}
-**Work Environment:** {self.profession_schema.environment.work_setting.value}, {self.profession_schema.environment.team_structure.value}
-
-**Your Capabilities:**
-"""
-        for cap in self.capabilities:
-            profession_context += f"\n- {cap.name}: {cap.description}"
-        
-        return aligned_prompt + profession_context
-    
-    def process_task(self, task: str, context: Optional[Dict[str, Any]] = None) -> TaskResult:
-        """Process task with profession-aware context enhancement."""
-        # Identify knowledge gaps
-        gaps = self.profession_schema.identify_knowledge_gaps(task)
-        
-        # Build context from conversation history if available
-        history = context.get("conversation_history", []) if context else []
-        
-        # Enhance prompt with profession context
-        enhanced_prompt = self.reasoning.enhance_prompt(
-            task,
+        # Step 1: Generate initial answer
+        initial_answer = reasoning_layer.enhance_prompt(
+            user_query,
             self.profession_schema,
             self.cognitive_profile,
-            history
+            conversation_history or []
         )
-        
-        # Extract decision factors if applicable
-        decision_factors = None
-        if any(kw in task.lower() for kw in ["should", "recommend", "decide", "choose"]):
-            decision_factors = self.reasoning.extract_decision_factors(
-                task,
-                self.profession_schema
-            )
-        
-        # Generate response
-        messages = [
-            {"role": "system", "content": self.get_system_prompt()},
-            {"role": "user", "content": enhanced_prompt}
-        ]
-        
-        response = self.llm_provider.generate(messages, temperature=0.7)
-        
-        # Validate response against safety rules
-        is_safe, violations = self.reasoning.validate_response(
-            response,
-            self.profession_schema
+
+        # Step 2: Reflect on the answer
+        eval_result = reflection_engine.evaluate_response(initial_answer, self.profession_schema)
+
+        # Step 3: Refine if necessary
+        if eval_result.get("needs_refinement"):
+            final_answer = reflection_engine.refine_response(initial_answer, self.profession_schema, eval_result)
+            return final_answer
+        else:
+            return initial_answer
+
+    def onboard_from_text(self, raw_text: str, user_id: str):
+        """
+        Onboard or update profession schema from raw onboarding text, including knowledge expansion.
+        """
+        interpreter = ProfessionSchemaInterpreter(self.llm_provider)
+        schema = interpreter.extract_schema(raw_text, user_id)
+
+        # Knowledge Expansion Layer integration
+        google_api_key = os.getenv("GOOGLE_API_KEY", "dummy")
+        google_cse_id = os.getenv("GOOGLE_SEARCH_ENGINE_ID", "dummy")
+        knowledge_expander = KnowledgeExpansionLayer(
+            llm_provider=self.llm_provider,
+            google_api_key=google_api_key,
+            google_cse_id=google_cse_id
         )
-        
-        if not is_safe:
-            warning = f"\n\n⚠️ **Safety Warning:** This response may violate professional safety rules:\n"
-            for violation in violations:
-                warning += f"- {violation}\n"
-            response += warning
-        
-        # Build metadata
-        metadata = {
-            "agent_id": self.agent_id,
-            "agent_role": self.role,
-            "profession": self.profession_schema.profession_name,
-            "knowledge_gaps": gaps,
-            "safety_validated": is_safe,
-            "aligned_persona": True,
-            "confidence": 0.9
-        }
-        
-        if decision_factors:
-            metadata["decision_factors"] = decision_factors
-        
-        return TaskResult(
-            success=True,
-            result=response,
-            metadata=metadata
+        enriched_schema = knowledge_expander.expand_schema(schema)
+        self.profession_schema = enriched_schema
+
+        self.aligned_persona = self.alignment.create_aligned_persona(
+            self.profession_schema,
+            self.cognitive_profile
         )
-    
-    def handle_task(
+    def __init__(
         self,
-        task: str,
-        context: Optional[Dict[str, Any]] = None,
-        use_skills: bool = True
-    ) -> TaskResult:
-        """Execute task with profession context. Alias for process_task."""
-        return self.process_task(task, context)
+        user_id: str,
+        profession_schema: ProfessionSchema,
+        cognitive_profile: CognitiveProfile,
+        llm_provider: Any,
+        router: Router = None
+    ):
+        # Validate input types
+        if not isinstance(profession_schema, ProfessionSchema):
+            raise TypeError("profession_schema must be a ProfessionSchema instance")
+        if not isinstance(cognitive_profile, CognitiveProfile):
+            raise TypeError("cognitive_profile must be a CognitiveProfile instance")
+
+        # Optionally, check for required attributes
+        required_prof_attrs = [
+            'profession_name', 'industry', 'decision_patterns', 'tools_equipment',
+            'skill_hierarchy', 'constraints', 'environment', 'role_definition', 'safety_rules', 'terminology'
+        ]
+        for attr in required_prof_attrs:
+            if not hasattr(profession_schema, attr):
+                raise AttributeError(f"ProfessionSchema missing required attribute: {attr}")
+
+        required_cog_attrs = ['user_id', 'writing_style', 'decision_pattern']
+        for attr in required_cog_attrs:
+            if not hasattr(cognitive_profile, attr):
+                raise AttributeError(f"CognitiveProfile missing required attribute: {attr}")
+
+        self.user_id = user_id
+        self.profession_schema = profession_schema
+        self.cognitive_profile = cognitive_profile
+        self.llm_provider = llm_provider
+        self.router = router
+
+        # Alignment
+        self.alignment = ParallelSelfAlignment()
+        # Create aligned persona
+        self.aligned_persona = self.alignment.create_aligned_persona(
+            self.profession_schema,
+            self.cognitive_profile
+        )
+
+        # Workflow engine for multi-step reasoning
+        self.workflow_engine = WorkflowEngine(self, llm_provider, router=router)
+
+        # Register with router if provided
+        if self.router:
+            self.router.register_agent(self.user_id, self.handle_message)
+
+    def handle_message(self, message: AgentMessage) -> AgentMessage:
+        """
+        Handle incoming agent-to-agent messages. Supports request, response, delegate, status_update.
+        Prevent infinite delegation recursion by checking trace_id and a max delegation depth.
+        """
+        # Prevent infinite recursion: check for delegation depth in metadata
+        max_delegation_depth = 5
+        depth = message.metadata.get("delegation_depth", 0)
+        if depth > max_delegation_depth:
+            return AgentMessage(
+                sender=self.user_id,
+                receiver=message.sender,
+                intent="error",
+                payload={"error": "Delegation recursion limit exceeded."},
+                metadata={"in_response_to": message.metadata.get("trace_id")}
+            )
+        # Prevent self-delegation loop
+        if message.sender == self.user_id and message.intent == "request":
+            return AgentMessage(
+                sender=self.user_id,
+                receiver=message.sender,
+                intent="error",
+                payload={"error": "Self-delegation detected."},
+                metadata={"in_response_to": message.metadata.get("trace_id")}
+            )
+        if message.intent == "request":
+            # Treat as a workflow request
+            # Pass message.metadata as context to track delegation_depth
+            context = dict(message.metadata) if message.metadata else {}
+            result = self.run_workflow(message.payload.get("user_request", ""), conversation_history=message.payload.get("history"), context=context)
+            return AgentMessage(
+                sender=self.user_id,
+                receiver=message.sender,
+                intent="response",
+                payload={"result": result},
+                metadata={"in_response_to": message.metadata.get("trace_id")}
+            )
+        elif message.intent == "delegate":
+            # Delegate a subtask to another agent (if router is present)
+            if self.router:
+                delegate_to = message.payload.get("delegate_to")
+                subtask = message.payload.get("subtask")
+                # Increment delegation depth
+                new_metadata = dict(message.metadata)
+                new_metadata["delegation_depth"] = depth + 1
+                response = self.router.delegate_task(
+                    from_agent=self.user_id,
+                    to_agent=delegate_to,
+                    intent="request",
+                    payload={"user_request": subtask},
+                    metadata={"delegated_by": self.user_id, "parent_trace_id": message.metadata.get("trace_id"), "delegation_depth": depth + 1}
+                )
+                return AgentMessage(
+                    sender=self.user_id,
+                    receiver=message.sender,
+                    intent="response",
+                    payload={"delegation_result": response.payload if response else None},
+                    metadata={"in_response_to": message.metadata.get("trace_id")}
+                )
+            else:
+                return AgentMessage(
+                    sender=self.user_id,
+                    receiver=message.sender,
+                    intent="response",
+                    payload={"error": "No router available for delegation."},
+                    metadata={"in_response_to": message.metadata.get("trace_id")}
+                )
+        elif message.intent == "status_update":
+            # Accept and acknowledge status updates
+            return AgentMessage(
+                sender=self.user_id,
+                receiver=message.sender,
+                intent="acknowledge",
+                payload={"status": "received"},
+                metadata={"in_response_to": message.metadata.get("trace_id")}
+            )
+        else:
+            # Unknown intent
+            return AgentMessage(
+                sender=self.user_id,
+                receiver=message.sender,
+                intent="error",
+                payload={"error": f"Unknown intent: {message.intent}"},
+                metadata={"in_response_to": message.metadata.get("trace_id")}
+            )
+    def run_workflow(self, user_request: str, conversation_history=None, context=None) -> str:
+        """
+        Use WorkflowEngine to plan, execute, and assemble a multi-step reasoning workflow.
+        """
+        # Step 1: Plan
+        steps = self.workflow_engine.plan_generation(user_request)
+        # Step 2: Execute steps (with reflection after each)
+        context = context or {}
+        context.setdefault("history", conversation_history or [])
+        step_results = self.workflow_engine.step_execution(steps, context=context)
+        # Step 3: Assemble final output
+        final_output = self.workflow_engine.assemble_final_output(step_results)
+        return final_output
+
+    def get_persona_config(self) -> Dict[str, Any]:
+        return self.aligned_persona
+
+    def generate_prompt(self, user_query: str, conversation_history=None) -> str:
+        """
+        Use the unified reasoning pipeline for single-step reasoning.
+        """
+        return self._reasoning_pipeline(user_query, conversation_history)
+
+# Example usage (for testing, remove in production)
+if __name__ == "__main__":
+    # You must construct ProfessionSchema and CognitiveProfile with all required fields
+    # Here is a minimal mockup for demonstration:
+    class MockDecisionPatterns:
+        decision_frameworks = ["framework1", "framework2"]
+        risk_tolerance = type("RiskTolerance", (), {"value": "moderate"})()
+        information_sources = ["source1", "source2"]
+
+    class MockToolsEquipment:
+        software = ["ToolA"]
+        platforms = ["PlatformA"]
+        methodologies = ["MethodA"]
+
+    class MockSkillHierarchy:
+        advanced = ["SkillA", "SkillB"]
+
+    class MockConstraints:
+        regulatory = ["RegulationA"]
+        ethical_considerations = ["EthicsA"]
+        time_sensitive = ["TimeA"]
+
+    class MockEnvironment:
+        autonomy_level = type("AutonomyLevel", (), {"value": "high"})()
+        team_structure = type("TeamStructure", (), {"value": "collaborative"})()
+        pace = type("Pace", (), {"value": "fast"})()
+        work_setting = type("WorkSetting", (), {"value": "remote"})()
+
+    class MockRoleDefinition:
+        primary_responsibilities = ["ResponsibilityA"]
+
+    class MockSafetyRules:
+        critical = ["Never do X"]
+        important = ["Avoid Y"]
+
+    class MockTerminology:
+        jargon = {"termA": "definitionA"}
+
+    class MockWritingStyle:
+        tone = "formal"
+        vocabulary_level = "advanced"
+        sentence_structure = "complex"
+
+    class MockDecisionPattern:
+        approach = "analytical"
+        risk_tolerance = "moderate"
+
+    profession_schema = ProfessionSchema(
+        profession_name="Engineer",
+        industry="Tech",
+        decision_patterns=MockDecisionPatterns(),
+        tools_equipment=MockToolsEquipment(),
+        skill_hierarchy=MockSkillHierarchy(),
+        constraints=MockConstraints(),
+        environment=MockEnvironment(),
+        role_definition=MockRoleDefinition(),
+        safety_rules=MockSafetyRules(),
+        terminology=MockTerminology()
+    )
+
+    cognitive_profile = CognitiveProfile(
+        user_id="user123",
+        writing_style=MockWritingStyle(),
+        decision_pattern=MockDecisionPattern()
+    )
+
+    class DummyLLM:
+        def generate(self, messages, temperature=0.3):
+            return '{"decision_type": "technical", "urgency": "immediate", "risk_level": "low", "stakeholders": ["team"], "constraints": ["budget"], "key_considerations": ["timeline"]}'
+
+    agent = PersonalizedAgent(
+        user_id="agent1",
+        profession_schema=profession_schema,
+        cognitive_profile=cognitive_profile,  # use the mock defined above
+        llm_provider=DummyLLM()               # use the mock defined above
+    )
+    print(agent.get_persona_config())
+
+class PersonalizedResearchAgent:
+    """Minimal stub for PersonalizedResearchAgent to unblock chat interface."""
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "research_agent"
+        self.role = "research"
+    def handle_message(self, message):
+        # Simple echo for demonstration
+        return f"[PersonalizedResearchAgent] Echo: {message}"
+
+class PersonalizedCodeAgent:
+    """Minimal stub for PersonalizedCodeAgent to unblock chat interface."""
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "code_agent"
+        self.role = "code"
+    def handle_message(self, message):
+        # Simple echo for demonstration
+        return f"[PersonalizedCodeAgent] Echo: {message}"
+
+class PersonalizedWriterAgent:
+    """Minimal stub for PersonalizedWriterAgent to unblock chat interface."""
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "writer_agent"
+        self.role = "writer"
+    def handle_message(self, message):
+        return f"[PersonalizedWriterAgent] Echo: {message}"
+
+class PersonalizedPlannerAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "planner_agent"
+        self.role = "planner"
+    def handle_message(self, message):
+        return f"[PersonalizedPlannerAgent] Echo: {message}"
+
+class PersonalizedCriticAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "critic_agent"
+        self.role = "critic"
+    def handle_message(self, message):
+        return f"[PersonalizedCriticAgent] Echo: {message}"
+
+class PersonalizedAnalystAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "analyst_agent"
+        self.role = "analyst"
+    def handle_message(self, message):
+        return f"[PersonalizedAnalystAgent] Echo: {message}"
+
+class PersonalizedDesignerAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "designer_agent"
+        self.role = "designer"
+    def handle_message(self, message):
+        return f"[PersonalizedDesignerAgent] Echo: {message}"
+
+class PersonalizedGeneralistAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "generalist_agent"
+        self.role = "generalist"
+    def handle_message(self, message):
+        return f"[PersonalizedGeneralistAgent] Echo: {message}"
+
+class PersonalizedSupportAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "support_agent"
+        self.role = "support"
+    def handle_message(self, message):
+        return f"[PersonalizedSupportAgent] Echo: {message}"
+
+class PersonalizedHelperAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "helper_agent"
+        self.role = "helper"
+    def handle_message(self, message):
+        return f"[PersonalizedHelperAgent] Echo: {message}"
+
+class PersonalizedResponderAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "responder_agent"
+        self.role = "responder"
+    def handle_message(self, message):
+        return f"[PersonalizedResponderAgent] Echo: {message}"
+
+class PersonalizedAdvisorAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "advisor_agent"
+        self.role = "advisor"
+    def handle_message(self, message):
+        return f"[PersonalizedAdvisorAgent] Echo: {message}"
+
+class PersonalizedSpecialistAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_id = "specialist_agent"
+        self.role = "specialist"
+    def handle_message(self, message):
+        return f"[PersonalizedSpecialistAgent] Echo: {message}"

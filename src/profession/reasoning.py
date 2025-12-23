@@ -271,9 +271,14 @@ class ParallelSelfAlignment:
         
         Returns a configuration for how the AI should behave.
         """
+        # Debug print statements to help trace issues
+        print("profession_schema:", type(profession_schema), vars(profession_schema))
+        print("cognitive_profile:", type(cognitive_profile), vars(cognitive_profile))
         persona = {
             "name": f"{cognitive_profile.user_id} (Professional Mode)",
             "profession": profession_schema.profession_name,
+
+
             "industry": profession_schema.industry,
             
             "communication_style": self._blend_communication_style(
@@ -290,6 +295,7 @@ class ParallelSelfAlignment:
             
             "constraints": self._merge_constraints(
                 profession_schema, cognitive_profile
+
             ),
             
             "behavioral_traits": self._define_behavioral_traits(
@@ -412,3 +418,4 @@ class ParallelSelfAlignment:
 Respond as this person would - combining professional expertise with personal style.
 """
         return prompt
+    

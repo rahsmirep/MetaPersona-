@@ -24,6 +24,7 @@ from .schema import (
 )
 
 from .onboarding_interpreter import OnboardingInterpreter
+from .profession_schema_interpreter import ProfessionSchemaInterpreter
 from .knowledge_expansion import KnowledgeExpansionLayer
 from .reasoning import ProfessionReasoningLayer, ParallelSelfAlignment
 from .interactive_onboarding import InteractiveOnboarding
@@ -32,6 +33,7 @@ from .profession_system import UniversalProfessionSystem
 __all__ = [
     # Main system
     "UniversalProfessionSystem",
+    "ProfessionSchemaInterpreter",
     
     # Core schema
     "ProfessionSchema",

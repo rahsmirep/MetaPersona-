@@ -1,3 +1,6 @@
+print("[DEBUG] metapersona.py script started")
+# Entry point for CLI
+# (Moved to end of file)
 #!/usr/bin/env python3
 """
 MetaPersona CLI - Command Line Interface
@@ -233,27 +236,24 @@ def chat(provider: str, data_dir: str, use_profile: bool, use_experts: bool):
                     console.print()
                     continue
                 
-                # Route to expert if enabled, otherwise use main agent
-                if use_experts and question_router:
-                    # Route question to best expert
+                # DIAGNOSTIC MODE: Print which handler/routing is triggered
+                diagnostic_keywords = ['run', 'execute', 'perform', 'task:', 'begin']
+                if any(kw in task.lower() for kw in diagnostic_keywords):
+                    console.print("[yellow][DIAGNOSTIC] Routing to task-execution pipeline (agent.process_task)")
+                    response = agent.process_task(task)
+                elif use_experts and question_router:
+                    console.print("[yellow][DIAGNOSTIC] Routing to expert persona via QuestionRouter")
                     routing = question_router.route_question(task, agent.profile)
-                    
                     if routing['expert_persona']:
                         console.print(f"[dim]→ Routing to expert: {routing['expert_persona']['name']} (confidence: {routing['confidence']:.0%})[/dim]")
-                        
-                        # Generate response using expert context
                         expert_context = f"""You are {routing['expert_persona']['name']}, {routing['expert_persona']['role']}.
-
 Your expertise: {', '.join(routing['expert_persona']['expertise_areas'])}
-
 Respond as this expert while maintaining the user's communication style and preferences."""
-                        
                         response = agent.process_task(task, context=expert_context)
                     else:
-                        # Fallback to main agent
                         response = agent.process_task(task)
                 else:
-                    # Process task with main agent
+                    console.print("[yellow][DIAGNOSTIC] Routing to main agent (default)")
                     response = agent.process_task(task)
                 
                 # Display response
@@ -1299,14 +1299,14 @@ def persona_chat(provider: str, data_dir: str):
             use_llm_routing=True
         )
 
-        console.print(f"\n[bold green]All agents ready![\/bold green]")
-        console.print(f"[dim]Cognitive Profile: {cognitive_profile.user_id}[\/dim]")
-        console.print(f"[dim]Writing Tone: {cognitive_profile.writing_style.tone}[\/dim]\n")
-        console.print("[dim]Type 'exit' to quit, 'agents' to list, 'stats' for analytics[\/dim]\n")
+        console.print(f"\n[bold green]All agents ready![/bold green]")
+        console.print(f"[dim]Cognitive Profile: {cognitive_profile.user_id}[/dim]")
+        console.print(f"[dim]Writing Tone: {cognitive_profile.writing_style.tone}[/dim]\n")
+        console.print("[dim]Type 'exit' to quit, 'agents' to list, 'stats' for analytics[/dim]\n")
 
         # Interactive loop
         session = PromptSession(history=InMemoryHistory())
-
+        
         while True:
             try:
                 user_input = session.prompt("\n[You] > ")
@@ -1315,27 +1315,35 @@ def persona_chat(provider: str, data_dir: str):
                     continue
 
                 if user_input.lower() == 'exit':
-                    console.print("[yellow]Goodbye![\/yellow]")
+                    console.print("[yellow]Goodbye![/yellow]")
                     break
 
                 if user_input.lower() == 'agents':
                     agents = registry.list_all()
-                    console.print(f"\n[bold]Your Personalized Agents:[\/bold]")
+                    console.print(f"\n[bold]Your Personalized Agents:[/bold]")
                     for agent in agents:
-                        console.print(f"  • {agent.agent_id} - {agent.description}")
+                        weight = cognitive_profile.agent_routing_preferences.get(agent.agent_id, 1.0)
+                        console.print(f"  • {agent.agent_id} ({agent.role}) - Weight: {weight:.2f}x")
                     continue
 
                 if user_input.lower() == 'stats':
                     stats = router.get_routing_stats()
-                    console.print(f"\n[bold]Routing Statistics:[\/bold]")
+                    console.print(f"\n[bold]Routing Statistics:[/bold]")
                     console.print(f"  Total routes: {stats['total_routes']}")
                     console.print(f"  Average confidence: {stats['average_confidence']:.2f}")
                     console.print(f"  Most used: {stats['most_used_agent']}")
-                    console.print(f"\n[bold]Agent usage:[\/bold]")
+                    console.print(f"\n[bold]Agent usage:[/bold]")
                     for agent_id, count in stats['agent_usage'].items():
                         console.print(f"  • {agent_id}: {count}")
                     continue
 
+                if user_input.lower() == 'profile':
+                    console.print(f"\n[bold]Your Profile:[/bold]")
+                    console.print(f"  Profession: {cognitive_profile.profession}")
+                    console.print(f"  Skill Packs: {', '.join(cognitive_profile.loaded_skill_packs)}")
+                    console.print(f"  Communication: {cognitive_profile.preferred_communication_style}")
+                    continue
+                
                 # Fetch recent conversation history from memory
                 recent_interactions = memory.get_recent_interactions(10)
                 conversation_history = [
@@ -1346,29 +1354,26 @@ def persona_chat(provider: str, data_dir: str):
                 # Route and execute with memory-aware context
                 agent = router.route_task(user_input, conversation_history=conversation_history)
                 if not agent:
-                    console.print("[red]No suitable agent found.[\/red]")
+                    console.print("[red]No suitable agent found.[/red]")
                     continue
 
-                console.print(f"[dim]→ Routing to {agent.agent_id}[\/dim]")
+                console.print(f"[dim]→ Routing to {agent.agent_id}[/dim]")
 
                 result = agent.handle_task(user_input, {"conversation_history": conversation_history})
 
                 if result.success:
-                    console.print(f"\n[bold green]{agent.role.title()}:[\/bold green]")
+                    console.print(f"\n[bold green]{agent.role.title()}:[/bold green]")
                     console.print(Panel(result.result, border_style="green"))
                 else:
-                    console.print(f"[red]Error: {result.error}[\/red]")
-
-                # Record this interaction in memory
-                memory.record_interaction(user_input, str(result.result))
+                    console.print(f"[red]Error: {result.error}[/red]")
 
             except KeyboardInterrupt:
-                console.print("\n[yellow]Use 'exit' to quit.[\/yellow]")
+                console.print("\n[yellow]Use 'exit' to quit.[/yellow]")
             except EOFError:
                 break
 
     except Exception as e:
-        console.print(f"[red]Error: {str(e)}[\/red]")
+        console.print(f"[red]Error: {str(e)}[/red]")
         import traceback
         traceback.print_exc()
 
@@ -2067,7 +2072,7 @@ def onboard_profession_command(provider: str, data_dir: str, interactive: bool, 
         confidence_table.add_row("Needs Expansion", str(needs_exp), style="red")
         
         console.print(confidence_table)
-        console.print()
+        console.print();
         
         console.print(f"[green]✓ Profession saved to: data/professions/{schema.profession_id}.json[/green]")
         
@@ -2175,5 +2180,7 @@ def show_profession_command(data_dir: str, output_format: str):
         console.print("[yellow]Run 'python metapersona.py onboard-profession' first.[/yellow]")
 
 
-if __name__ == '__main__':
+# Entry point for CLI (must be last)
+if __name__ == "__main__":
+    print("[DEBUG] __main__ entry point reached")
     cli()

@@ -110,24 +110,28 @@ class UniversalProfessionSystem:
         
         return schema
     
-    def load_profession_schema(self, user_id: str) -> Optional[ProfessionSchema]:
-        """Load profession schema for a user."""
+    def load_profession_schema(self, identifier: str) -> Optional[ProfessionSchema]:
+        """Load profession schema by user_id or full profession_id."""
         # Check cache
-        if user_id in self.loaded_schemas:
-            return self.loaded_schemas[user_id]
-        
-        # Find schema file
-        schema_files = list(self.profession_dir.glob(f"{user_id}_*.json"))
+        if identifier in self.loaded_schemas:
+            return self.loaded_schemas[identifier]
+
+        # Try full profession_id match first
+        schema_file = self.profession_dir / f"{identifier}.json"
+        if schema_file.exists():
+            schema = ProfessionSchema.load(schema_file)
+            self.loaded_schemas[identifier] = schema
+            return schema
+
+        # Fallback: match by user_id prefix
+        schema_files = list(self.profession_dir.glob(f"{identifier}_*.json"))
         if not schema_files:
             return None
-        
+
         # Load most recent
         schema_file = max(schema_files, key=lambda p: p.stat().st_mtime)
         schema = ProfessionSchema.load(schema_file)
-        
-        # Cache
-        self.loaded_schemas[user_id] = schema
-        
+        self.loaded_schemas[identifier] = schema
         return schema
     
     def save_profession_schema(self, schema: ProfessionSchema):
