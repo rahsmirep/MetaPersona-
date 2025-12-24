@@ -7,6 +7,9 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 import json
 
+from src.agent_messaging import AgentMessage
+from src.single_use_agent import SingleUseAgent
+
 from .agent_base import BaseAgent
 from .task_result import TaskResult
 from .agent_registry import AgentRegistry

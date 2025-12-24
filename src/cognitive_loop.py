@@ -35,13 +35,30 @@ class CognitiveLoop:
 		msg = self.router.route_message(agent_msg) if hasattr(self.router, 'route_message') else None
 		styled_output = None
 		internal_output = None
+		metadata = {}
 		if msg and hasattr(msg, 'payload') and isinstance(msg.payload, dict):
 			styled_output = msg.payload.get('result', None)
 			internal_output = msg.payload.get('internal', None)
+			# Collect turn-level metadata for Web3 rendering
+			metadata = {
+				"mode": getattr(self.mode_manager, 'get_mode', lambda: None)(),
+				"handler": msg.metadata.get('handler') if hasattr(msg, 'metadata') else None,
+				"persona_shaping": getattr(self.persona_context, 'voice_style', None),
+				"memory_updates": getattr(self.persona_context, 'persona_memory', None),
+				"routing_trace": msg.metadata.get('routing_trace') if hasattr(msg, 'metadata') else None,
+				"signature_required": msg.metadata.get('signature_required') if hasattr(msg, 'metadata') else False,
+				"persona_state_update": msg.metadata.get('persona_state_update') if hasattr(msg, 'metadata') else False
+			}
 		# Update persona memory for both internal and external outputs
 		if internal_output:
 			self.persona_memory_engine.observe_and_update(internal_output, user_message)
 		if styled_output:
 			self.persona_memory_engine.observe_and_update(styled_output, user_message)
-		return styled_output
+		# Return output and metadata for UI/Web3
+		return {
+			"display_text": styled_output,
+			"reasoning_trace": internal_output,
+			"metadata": metadata,
+			"persona_state": self.persona_context
+		}
 

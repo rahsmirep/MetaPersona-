@@ -6,13 +6,26 @@ class PersonaStyler:
         self.persona_context = persona_context
 
     def style(self, raw_text, mode=None):
-        # Always use evolving voice_style for style tag, ignore mode-specific override
-        style = self.persona_context.voice_style
-        tone = ", ".join(self.persona_context.tone_modifiers)
-        phrasing = self.persona_context.signature_phrasing
-        # Always include style and tone for memory engine
+        # Safeguard: suppress persona shaping for low-intent/casual/dismissive input or suppression mode
+        def is_low_intent(text):
+            low_intent_phrases = [
+                "nothing lol", "idk", "nah", "don’t care", "don't care", "nope", "whatever", "meh", "shrug"
+            ]
+            t = text.strip().lower()
+            return any(phrase in t for phrase in low_intent_phrases) or len(t) < 4
+
+        suppression = getattr(self.persona_context, 'persona_suppression_mode', False)
+        if suppression or is_low_intent(raw_text):
+            # Minimal/neutral shaping
+            style = "neutral"
+            tone = ""
+            phrasing = []
+        else:
+            style = self.persona_context.voice_style
+            tone = ", ".join(self.persona_context.tone_modifiers)
+            phrasing = self.persona_context.signature_phrasing
+
         styled = f"[{style} | {tone}] {raw_text}"
-        # Always include signature phrasing, even if empty (for extraction)
         if phrasing and len(phrasing) > 0:
             styled += "\n" + " ".join(phrasing)
         else:

@@ -61,6 +61,12 @@ def handler_reflection(msg):
     flow = msg.metadata.get('flow_signals', {})
     from src.persona_styler import PersonaStyler
     styler = PersonaStyler(persona)
+    # Suppress persona shaping for fallback/diagnostic
+    fallback_or_diag = msg.metadata.get('mode', '') in ('fallback', 'diagnostic') or getattr(persona, 'persona_suppression_mode', False)
+    if fallback_or_diag:
+        summary = "[neutral | ] Routing to main agent."
+        internal_styled = "[neutral | ] Diagnostic: fallback routing."
+        return AgentMessage(sender=msg.receiver, receiver=msg.sender, intent='reflection', payload={'result': summary, 'internal': internal_styled}, metadata={})
     # Persona-aware reflection (internal reasoning)
     summary = f"{persona.get_mode_style('reflection').capitalize()} reflection: Plan progress: {len(completed)} completed, {len(pending)} pending. "
     if plan and step_index < len(plan):
@@ -84,6 +90,11 @@ def handler_error_recovery(msg):
     flow = msg.metadata.get('flow_signals', {})
     from src.persona_styler import PersonaStyler
     styler = PersonaStyler(persona)
+    fallback_or_diag = msg.metadata.get('mode', '') in ('fallback', 'diagnostic') or getattr(persona, 'persona_suppression_mode', False)
+    if fallback_or_diag:
+        summary = "[neutral | ] Fallback: unable to process request."
+        internal_styled = "[neutral | ] Diagnostic: fallback error recovery."
+        return AgentMessage(sender=msg.receiver, receiver=msg.sender, intent='error-recovery', payload={'result': summary, 'repaired_plan': [], 'internal': internal_styled}, metadata={'plan_repaired': False})
     # Simulate plan repair for test
     repaired_plan = [{'step': 'Repaired step 1', 'status': 'pending'}]
     # Persona-aware error recovery (internal reasoning)

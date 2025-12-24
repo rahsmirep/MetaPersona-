@@ -12,7 +12,8 @@ class PersonaContext:
                  tone_history: list = None,
                  signature_patterns_used: list = None,
                  user_preference_inferences: dict = None,
-                 persona_evolution_state: dict = None):
+                 persona_evolution_state: dict = None,
+                 persona_suppression_mode: bool = False):
         self.voice_style = voice_style
         self.tone_modifiers = tone_modifiers or ["confident"]
         self.mode_specific_style = mode_specific_style or {
@@ -28,6 +29,7 @@ class PersonaContext:
         self.signature_patterns_used = signature_patterns_used or []
         self.user_preference_inferences = user_preference_inferences or {}
         self.persona_evolution_state = persona_evolution_state or {"stability": 1.0, "last_update": None}
+        self.persona_suppression_mode = persona_suppression_mode
 
     def update_style(self, key, value):
         # If updating voice_style, propagate to mode_specific_style if any mode was using the old voice_style
